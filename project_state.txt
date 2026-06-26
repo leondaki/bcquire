@@ -1,0 +1,409 @@
+PROJECT STATE — Acquire Clone (Godot)
+Last updated: 2026-06-26
+
+================================================================================
+1. MAIN GOALS
+================================================================================
+- Faithful clone of the board game Acquire: identical rules/mechanics to the
+  original, verified against the official rules text (ACQUIRE RULES.txt, root).
+- Playable online multiplayer, eventually.
+- Re-themeable: art assets, hotel-chain names/colors, and labels must be
+  swappable later (different theme/IP) WITHOUT touching any rules/game logic.
+- Locally testable in two senses, both already working:
+    a) rules/mechanics — headless, no UI, no network required.
+    b) full interactive game loop — playable hotseat in one Godot window.
+- Eventually packaged for Steam release (Windows + Linux/Steam Deck) under the
+  new theme.
+
+================================================================================
+2. OVERALL ARCHITECTURE
+================================================================================
+Engine: Godot 4.7 (GDScript only, GL Compatibility renderer).
+Godot console exe (Windows, for headless/test runs):
+  C:\Users\leond\AppData\Local\Microsoft\WinGet\Packages\
+  GodotEngine.GodotEngine_Microsoft.Winget.Source_8wekyb3d8bbwe\
+  Godot_v4.7-stable_win64_console.exe
+Project root: C:\Users\leond\OneDrive\Desktop\bcquire (NOT a git repo).
+
+CORE DESIGN PATTERN: strict separation of rules engine / theme / UI / (future)
+networking. This is the single load-bearing decision in the codebase:
+  - core/        Pure rules engine. RefCounted classes only. No Node, no UI,
+                 no theme, no networking. Fully deterministic. Drives itself
+                 via explicit method calls (do_found, do_grow, merger_begin,
+                 buy_stock, etc.) — these are exactly the calls net/session.gd
+                 now drives on the host's behalf (M4 Stage A, see section 3).
+  - net/         M4 multiplayer plumbing (Stages A+B done, see section 3):
+                 action.gd/event.gd (Dictionary schemas), network_transport.gd
+                 (abstract interface, RefCounted), loopback_transport.gd +
+                 loopback_hub.gd (zero-socket, headlessly-testable transport),
+                 enet_transport.gd (real ENetMultiplayerPeer LAN transport —
+                 extends Node, not NetworkTransport, since Godot's high-level
+                 RPC system requires a Node; duck-typed to the same surface),
+                 session.gd (GameSession — host-authoritative router between
+                 GameState and whichever transport is active). core/ still
+                 never imports net/ — the dependency runs net/ -> core/, one
+                 direction, same as ui/ -> core/.
+  - theme/       ThemeDef resource (theme_def.gd) + default_theme.tres. ALL
+                 cosmetic config: board size/tile size, palette, per-chain
+                 display name + color (indexed by AcqEnums.ChainId). UI reads
+                 ONLY from ThemeDef; core/ never imports theme/. Re-skinning =
+                 new .tres + art, zero logic changes.
+  - ui/game/     The interactive game (current main scene). Controller
+                 (game.gd) owns a GameSession (net/session.gd) and reads its
+                 GameState mirror; drives the turn through phases by sending
+                 Actions and reacting to session.event_applied — builds the
+                 entire UI procedurally in code (no scene sub-nodes beyond the
+                 bare Control root) for steppers, popups, cards, etc. Defaults
+                 to a solo hotseat_mode session, so today's local play is
+                 unchanged even though every mutation now goes through net/.
+  - ui/board/    LEGACY M1 sandbox (Tile.tscn/board.gd). Superseded by
+                 ui/game/. Still present on disk but not the run scene and
+                 not maintained — safe to delete later, harmless to ignore now.
+  - sim/         Headless test suites (SceneTree scripts, no GUT dependency).
+                 Includes run_network_tests.gd (M4 Stage A): host/client
+                 GameState convergence test over a loopback transport.
+
+FOLDER STRUCTURE (actual files on disk):
+  project.godot                  main_scene = res://ui/game/Game.tscn
+                                  stretch mode = disabled (1:1 pixel viewport,
+                                  no canvas_items scaling), window resizable,
+                                  min_size enforced at runtime (1000x620).
+  ACQUIRE RULES.txt              official rules reference text (root dir).
+  project_state.txt              this file.
+
+  core/enums.gd                  AcqEnums: board geometry (12x9=108 tiles),
+                                  ChainId enum (7 chains, tier-grouped:
+                                  cheap=TOWER,LUXOR; medium=AMERICAN,
+                                  WORLDWIDE,FESTIVAL; expensive=IMPERIAL,
+                                  CONTINENTAL), GamePhase enum, PlacementKind
+                                  enum (ISOLATED/FOUND/GROW/MERGE/
+                                  ILLEGAL_DEAD/ILLEGAL_TEMP), tile_label()
+                                  coordinate helper ("7C" style).
+  core/stock_market.gd            StockMarket: pure price(chain,size) and
+                                  majority_bonus()/minority_bonus() (10x/5x)
+                                  functions. Verified against the rules doc's
+                                  own worked example (Imperial size 5 -> 700,
+                                  7000, 3500 — exact match).
+  core/game_state.gd               GameState: the whole rules engine.
+                                  - board: PackedInt32Array, CELL_EMPTY /
+                                    ChainId.NONE (lone tile) / chain id.
+                                  - classify_placement() decides
+                                    found/grow/merge/dead/temp WITHOUT
+                                    mutating anything (UI previews legality
+                                    from this before allowing a drag-drop).
+                                  - merger_info()/merger_begin()/
+                                    merger_dispose()/merger_finish(): merger
+                                    survivor sizes are computed BEFORE the
+                                    connecting tile is added (new tile never
+                                    counts toward either chain's pre-merger
+                                    size — verified by test).
+                                  - _pay_bonuses(): majority/minority with
+                                    sole-holder-gets-both and tie-splitting
+                                    (rounded up to nearest $100), matches
+                                    rules doc exactly.
+                                  - setup_new_game(): full deal INCLUDING the
+                                    rules-mandated starting-draw phase (see
+                                    section 3/4).
+                                  - setup_blank(): no tiles dealt, for tests
+                                    that hand-build exact board positions.
+                                  - compute_final_scores(): end-game payout +
+                                    stock liquidation.
+  sim/run_tests.gd                 Headless rules test suite. 77 assertions,
+                                  0 failures. Run via:
+                                    godot --headless --path <proj> --import
+                                    godot --headless --path <proj> --script sim/run_tests.gd
+                                  Expect "==== N passed, 0 failed ====", exit 0.
+  sim/check_midgame.gd              Headless UI-integration check: instances
+                                  Game.tscn, calls _generate_midgame(), and
+                                  asserts both engine state AND UI-side
+                                  derived flags (board cell .playable flags)
+                                  are correct. 18 assertions, 0 failures.
+                                  Must run with --process deferral (loads
+                                  scene + calls _ready before asserting) —
+                                  see file header comment for why.
+
+  theme/theme_def.gd                ThemeDef resource script: board_width/
+                                  height, tile_size, full color palette incl.
+                                  color_playable (yellow legal-square hint),
+                                  chain_names (PackedStringArray) and
+                                  chain_colors (PackedColorArray), indexed by
+                                  ChainId.
+  theme/default_theme.tres          The only theme currently authored.
+
+  ui/game/Game.tscn                 Main scene (just a bare Control + script).
+  ui/game/game.gd                   Controller. Builds the ENTIRE UI in code
+                                  in _build_layout(). Owns `state: GameState`
+                                  and is the only place that calls into
+                                  core/. Key structure (see section 4 for the
+                                  sizing-bug history):
+                                    main_vbox
+                                      content_row (HBox, expand-fill)
+                                        left_scroll -> left VBox: title,
+                                          board grid, message label, bottom
+                                          row (chains table | price chart)
+                                        right_scroll -> side VBox: header,
+                                          phase label, rack, stock cards,
+                                          action box (phase-dependent)
+                                      footer (HBox, pinned OUTSIDE any
+                                        scroll — Generate Mid-Game / Reset
+                                        buttons, always visible)
+                                  Phase state machine drives _action_box
+                                  contents: PLACE_TILE / FOUND_CHAIN /
+                                  RESOLVE_MERGER (tie sub-mode or dispose
+                                  sub-mode) / BUY_STOCK / GAME_OVER.
+                                  _generate_midgame() builds a hand-authored
+                                  scenario covering every UI case at once
+                                  (2 safe chains, all 7 chains on board, a
+                                  dead tile, a temp-blocked tile, a tie
+                                  merge, a normal merge, a grow, an isolated
+                                  placement) — primary manual-test entry
+                                  point, also driven by sim/check_midgame.gd.
+  ui/game/board_cell.gd              BoardCell (Button): one board square.
+                                  Pure view of GameState.cell(); colors from
+                                  ThemeDef. `playable` flag drives the yellow
+                                  legal-square shading. Drag-drop TARGET:
+                                  only accepts a drop whose tile coord
+                                  exactly matches its own (col,row).
+  ui/game/rack_tile.gd                RackTile (Button): one hand tile. Drag-
+                                  drop SOURCE. `dead` flag -> styled red,
+                                  un-draggable (engine still allows a manual
+                                  Redraw button next to it in game.gd, this
+                                  was an explicit user-requested QoL feature,
+                                  not strict-rules behavior — see section 4).
+  ui/game/stock_card.gd               StockCard (PanelContainer): themed
+                                  "certificate" card for a held chain's
+                                  stock (name/count/price), colored by
+                                  ThemeDef.chain_color(). Reused (smaller) for
+                                  bank-remaining indicators in the chains
+                                  table, and restyled with a +/- stepper for
+                                  the buy-phase cards (built inline in
+                                  game.gd's _build_buy_card(), not via the
+                                  StockCard class itself).
+
+  ui/board/*  (legacy, unused — see above)
+
+================================================================================
+3. CURRENT STATE & ACTION PLAN
+================================================================================
+100% COMPLETE (verified, working, tested):
+  - Pure rules engine (core/): found/grow/merge incl. survivor-excludes-new-
+    tile rule, tie detection, safe chains (size>=11) and dead-tile detection
+    (would merge two safe chains), majority/minority bonuses incl. sole-
+    holder and tie-split cases, stock disposal (sell/trade 2-for-1/keep),
+    buy limits (3 shares/turn, bank/cash validation), end-game trigger +
+    scoring. 77/77 headless test assertions pass.
+  - Rules-document audit completed: engine cross-checked line-by-line against
+    ACQUIRE RULES.txt. Two real gaps found and fixed (see section 4 for the
+    "closest to 1A" ranking bug found along the way):
+      1. Starting-draw setup phase (rules step 8) — now implemented in
+         GameState.setup_new_game() via _deal_starting_tiles().
+      2. "Founding with zero stock available" rare case — founder now gets
+         cash instead of a share when the bank has none left to give.
+  - Full interactive hotseat UI (ui/game/): drag-and-drop tile placement
+    (coordinate-locked), founding popup (color-coded chain buttons), merger
+    resolution incl. tie-survivor popup and per-shareholder dispose flow,
+    buy-phase stock-card steppers with live cross-stepper 3-share cap, end-
+    turn/declare-game-end buttons, game-over standings screen.
+  - Theme-driven visuals throughout: board cell colors, stock cards, buy
+    cards, chains table, price chart, founding/tie buttons all read from
+    ThemeDef — none hardcode a chain name or color.
+  - UX polish round: yellow playable-square highlighting (correctly excludes
+    temporarily-blocked 8th-chain squares), red dead-tile styling with a
+    per-tile Redraw button, bottom-left chains table (company / size-icon /
+    price / bank-stock-indicator) sized to half-width with a static stock
+    price chart card filling the other half, hand tiles sorted left-to-right
+    by column-then-row for readability.
+  - Window-layout fix: scroll containers on both columns + a footer pinned
+    outside any scroll, so the Generate Mid-Game / Reset test buttons can
+    never be clipped off-screen regardless of window size; runtime minimum
+    window size enforced (1000x620); viewport stretch mode set to "disabled"
+    (1:1 pixels, no scaling artifacts).
+  - Test tooling: "Generate Mid-Game" button (+ matching headless check
+    sim/check_midgame.gd) and "Reset (Empty)" button, both in the always-
+    visible footer.
+
+IN PROGRESS:
+  - M4 Stage A (Action/Event plumbing) just landed — see "M4 — Networked
+    multiplayer" below for what shipped and what's still open. All headless
+    suites green (run_tests.gd 77/77, check_midgame.gd 18/18,
+    run_network_tests.gd convergence test, see section 4 for how to run).
+
+NEXT MILESTONES (in order):
+  1. M4 — Networked multiplayer. Staged per net/session.gd's host-
+     authoritative design (full plan: a now-historical plan doc; this section
+     is the live status).
+       STAGE A — DONE: Action/Event plumbing + loopback transport + the
+         ui/game/game.gd refactor.
+           - net/action.gd, net/event.gd: Action/Event are plain Dictionaries
+             ({type, player, payload}); these two files hold the type
+             constants and make_*() builders.
+           - net/network_transport.gd: abstract interface (host/join/
+             send_action/broadcast_event/send_event_to, signals
+             action_received/event_received/peer_joined/peer_left).
+           - net/loopback_transport.gd + net/loopback_hub.gd: in-process,
+             zero-socket transport — peer id is registration order on a
+             shared LoopbackHub (host is always peer 0). This is what makes
+             the whole layer testable headlessly with no real networking.
+           - net/session.gd (GameSession): the host-authoritative router.
+             Host always independently re-runs the same GameState calls
+             ui/game/game.gd used to call directly (classify_placement,
+             do_found, merger_begin, etc.) and broadcasts an Event built from
+             the *actual* result; clients never re-derive an outcome — they
+             replay the identical state.* calls from the event's payload
+             (_apply_event_to_state). This is what guarantees host/client
+             convergence by construction.
+           - ui/game/game.gd: every former direct state.do_xxx() call site
+             (drop_tile, _on_found_chosen, _on_survivor_chosen,
+             _on_dispose_confirm, _commit_buy, _redraw_tile) now builds an
+             Action and calls session.send_action(); a single dispatcher
+             _on_event_applied() (driven by session.event_applied) does all
+             the UI-state updates that used to live inline in those
+             functions. _is_my_turn()/_is_my_seat() seat-gating helpers exist
+             and disable input + show a "Waiting for ...'s move" label for
+             non-active seats, but are inert by default: _ready() wires up a
+             solo GameSession with hotseat_mode = true (one peer, every seat
+             playable locally), which is what reproduces today's hotseat
+             behaviour unchanged. _generate_midgame() dev harness still pokes
+             GameState directly (session.state = state) — intentionally not
+             routed through Actions, since it's test tooling, not real play.
+           - sim/run_network_tests.gd: headless convergence test — two
+             GameSessions (host seat 0 / client seat 1) share a LoopbackHub
+             and auto-play a full game purely through session.send_action(),
+             asserting host/client GameState deep-equality after every single
+             action. This is the regression net for the Action/Event layer;
+             run it alongside the other two suites (section 4).
+       STAGE B — DONE: net/enet_transport.gd + a minimal lobby row in
+         game.gd's footer.
+           - net/enet_transport.gd extends Node (NOT NetworkTransport's
+             RefCounted base — Godot's high-level RPC system requires a Node
+             in the scene tree so a peer's RPC lands on the matching node at
+             the same NodePath on every machine). GDScript has no enforced
+             interfaces, so it just exposes the identical method/signal
+             surface NetworkTransport documents; net/session.gd's `transport`
+             field is deliberately untyped (duck-typed) to accept either.
+             Host/server is always peer id 1 (Godot's high-level multiplayer
+             convention); client ids are ENet-assigned, NOT sequential by
+             join order, so (unlike LoopbackTransport) peer id can't double
+             as a seat index here.
+           - Seat assignment: Event.make_game_started() gained a third
+             `peer_seats` field (transport peer id -> seat index), built by
+             the host's lobby (seat 0 = host, joiners get 1, 2, ... in
+             connect order) and broadcast as part of the one GAME_STARTED
+             event. Each client's GameSession looks itself up in that map
+             (_on_event_received_as_client) and sets local_player_index —
+             no separate private "you are seat N" message needed.
+           - game.gd's footer gained a lobby row: host port field + Host
+             button, join address/port fields + Join button, a status label,
+             and a host-only "Start Networked Game" button. Host/Join replace
+             the default solo `session` with a real EnetTransport-backed one
+             (hotseat_mode = false) and null out `state` until the real
+             GameState arrives via GAME_STARTED (can_drag_tiles/
+             can_drop_tile/_refresh_all all guard against state == null —
+             the board just freezes rather than crashing while a peer waits
+             in the lobby). The dev-tooling row (Generate Mid-Game/Reset)
+             auto-hides once any remote peer has joined
+             (_dev_tools_visible()), since those buttons poke GameState
+             directly and would desync anyone else watching.
+           - No new headless test for Stage B by design: real socket/RPC
+             behavior can't be exercised without an actual transport, so
+             verification here is the manual two-window LAN checklist
+             (now-historical plan doc has the original script; section 4
+             below keeps the live version).
+       STAGE C — NOT STARTED: verify seat-gating (_is_my_turn/_is_my_seat)
+         actually disables the right controls once Stage B's hotseat_mode is
+         false; sim/check_seat_gating.gd.
+       STAGE D — NOT STARTED: ai/bot_player.gd, a simple rule-based bot that
+         calls session.send_action() like any other seat, for solo seat-
+         filling; sim/check_bot_game.gd.
+       STAGE E — NOT STARTED: consolidate the new sim/ suites into the
+         "always re-run" discipline (already done for run_network_tests.gd —
+         see section 4 below).
+  2. M5 — Theming pass. Author a second ThemeDef (different name/art) to
+     prove the re-skin path requires zero core/ or ui/ logic changes.
+  3. M6 — Steam packaging. GodotSteam integration (steam_transport.gd behind
+     the same network_transport.gd interface), Steam App ID + steam_appid.txt
+     for local testing, Windows + Linux export presets, Steam Deck input/
+     resolution pass, steamcmd depot upload docs.
+
+================================================================================
+4. CRITICAL CONTEXT
+================================================================================
+RULES CORRECTNESS (load-bearing, do not regress):
+  - Merger survivor/bonus sizes are computed from PRE-merger chain sizes —
+    the tile that causes the merger is NEVER counted toward either chain's
+    size when picking the survivor or computing bonuses. Enforced by
+    test_merger_excludes_new_tile() in sim/run_tests.gd. This is the single
+    easiest Acquire rule to get wrong; do not "simplify" merger code without
+    re-running that test.
+  - "Closest to 1A" for starting-tile turn order is ROW-MAJOR, not column-
+    major: rank = row * BOARD_WIDTH + col. This was gotten wrong on the
+    first implementation attempt (used col-major) and caught only because
+    the rules text's own example ("9A is closer to 1A than 1B") was encoded
+    as an explicit test assertion. If this logic is ever touched again,
+    re-derive from that exact sentence in ACQUIRE RULES.txt, don't trust
+    intuition.
+  - Bonus rounding: ties round UP to the nearest $100 (StockMarket-adjacent
+    helper _round_up_100() in game_state.gd). This is in the official rules
+    text verbatim ("rounded up to the nearest hundred").
+  - The price/bonus formulas were independently validated against the rules
+    doc's own Tycoon-mode worked example (Imperial, size 5: price 700,
+    primary/majority 7000, tertiary 3500) even though this project only
+    implements Classic Mode (2 payout tiers: majority/minority, no
+    tertiary) — Classic Mode's "minority" bonus is mathematically the same
+    5x-price tier as Tycoon Mode's "tertiary" in that example, which is how
+    the cross-check works. Tycoon Mode (3-tier bonus) is NOT implemented and
+    not currently planned.
+
+DELIBERATE RULE DEVIATION (user-requested, keep as is):
+  - Strict rules say unplayable ("dead") tiles are only set aside at END of
+    turn, and any newly-dead tile from that turn's draw must wait until next
+    turn to be discarded. This project instead gives the player an immediate
+    "Redraw" button next to any dead tile in their rack, usable any time
+    during PLACE_TILE phase. This was an explicit user request (QoL during
+    testing), not an oversight — do not "fix" this to match strict rules
+    without asking first.
+
+ENGINE GOTCHAS HIT AND FIXED (so they aren't rediscovered):
+  - GDScript type inference: untyped Array literals used in typed contexts
+    (e.g. `const DIRS := [Vector2i(...), ...]`) fail to compile under strict
+    typing with "Cannot infer the type of variable" — must declare as
+    `Array[Vector2i]` explicitly. Hit once in game_state.gd's DIRS constant;
+    if a similarly "obviously typed" const array gets added, declare its
+    element type explicitly up front.
+  - BoardCell.setup() must NOT call refresh() during construction — cells
+    are built (in game.gd's _build_layout) BEFORE a GameState exists; calling
+    state.cell() at that point hits a null `_ctrl.state`. The controller's
+    _refresh_all() (called once after setup_new_game()/_generate_midgame())
+    is solely responsible for the first paint.
+  - Headless SceneTree test scripts that instance a scene and immediately
+    call a method on it must defer to at least one _process() tick before
+    interacting with it if the scene's _ready() builds UI children — calling
+    methods from _initialize() (same frame as add_child) runs before _ready,
+    so children referenced by the controller are still null. See
+    sim/check_midgame.gd's file-header comment.
+  - Button.text does not support `&` mnemonics being escaped — a literal "&&"
+    in a button label renders as a doubled "&&" on screen, not "&". Use a
+    single "&" if you want a literal ampersand in a Godot Button's text.
+
+PROJECT-LEVEL CONSTRAINTS:
+  - Not a git repository (Is a git repository: false at session start). No
+    version control is in place; "create a new commit" workflows do not
+    apply here unless/until the user initializes one.
+  - Windows machine; PowerShell is the shell tool used for all Godot CLI
+    invocations (Bash tool also available, both work, PowerShell used in
+    practice throughout this project's history).
+  - Always re-run ALL THREE headless suites after any change to core/,
+    net/, or ui/game/game.gd before declaring work done:
+      godot --headless --path <proj> --import   (only needed if a new
+        class_name was added/removed; harmless to always run)
+      godot --headless --path <proj> --script sim/run_tests.gd
+      godot --headless --path <proj> --script sim/check_midgame.gd
+      godot --headless --path <proj> --script sim/run_network_tests.gd
+    Current expected output: "==== 77 passed, 0 failed ====",
+    "==== 18 passed, 0 failed ====", and a convergence-test pass count with
+    0 failed, all exit code 0. (A handful of "ObjectDB leaked"/"resources
+    still in use at exit" warnings on process exit are pre-existing noise
+    from headless scripts loading scenes/resources without explicit
+    cleanup — not a regression signal; only the failed-count and exit code
+    matter.) sim/check_seat_gating.gd and sim/check_bot_game.gd will join
+    this list once M4 Stages C/D land.

@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://ui/board/tile.gd" id="1"]
+
+[node name="Tile" type="Button"]
+offset_right = 72.0
+offset_bottom = 72.0
+script = ExtResource("1")

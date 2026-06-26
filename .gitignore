@@ -1,0 +1,11 @@
+# Godot 4 editor cache / import artifacts — regenerated locally, not source.
+.godot/
+
+# Godot 4 export/mono artifacts (not used by this project yet, but harmless to ignore)
+.mono/
+export_presets.cfg
+*.translation
+
+# OS cruft
+.DS_Store
+Thumbs.db

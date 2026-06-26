@@ -1,0 +1,265 @@
+ACQUIRE RULES
+
+HOW TO WIN
+You are a shrewd real-estate tycoon with an eye for investing in hotel chains.
+Each time a hotel chain gets acquired, big money will be paid out to the top
+shareholders. The player who makes the most money by buying and selling
+hotel chain stocks wins!
+
+
+SETUP
+1. Place the gameboard in the center of all players.
+2. Place the building tiles facedown next to the gameboard and mix them well.
+3. Choose a player to be the banker. This player will pass out stocks and
+handle money exchanges throughout the game. The banker places the
+seven headquarters buildings and the stock cards, separated by hotel
+chain, in the stock market tray as shown.
+4. The banker gives each player $6,000 each.
+6. Each player gets one stockholder info card and places it in front of them.
+As a group, decide whether stockholder bonuses will be paid to the top
+TWO stockholders during a merger.
+8. Decide who will go first. To do so, each player draws a building tile from
+the facedown pile and puts it faceup on the matching letter/number space
+on the gameboard. The player who plays the tile closest to 1A goes first,
+and play moves to the left. (9A is closer to 1A than 1B is.) Leave the tiles on
+the gameboard. (Note that if two or more of these tiles are adjacent to
+each other, they are considered independent. If an additional tile is added
+later, they may become a hotel chain.)
+9. Each player draws six building tiles and stands the tiles up in front of them
+so other players can’t see the tiles.
+
+
+HOW TO PLAY
+On your turn, you’ll perform the following three actions.
+1. Place a building tile on its matching space.
+2. Buy up to three stocks in any active hotel chains.
+3. Draw a new building tile from the facedown pile.
+You’ll find a more detailed description of each action below.
+1. Place a Building Tile
+The tiles represent new hotels. Each turn, you will add one to the game board.
+Choose one of your building tiles, and place it on its matching space on the
+gameboard. For example, the 1A building tile goes on space 1A on the gameboard.
+When you place a building tile, one of the following things will happen:
+YOU ADD AN INDEPENDENT BUILDING
+If you place a building tile on a space with no
+building tiles adjacent to it, you’ve simply placed
+a building. Nothing else happens.
+YOU FOUND A HOTEL CHAIN
+If you place a building tile next to any number of building tiles that aren’t
+already part of a hotel chain, you’ll found a new hotel chain. Those building tiles
+are now considered a founded hotel chain.
+You place building tile 6F next to
+building tile 7F. The adjacent building
+tiles form a hotel chain.
+Here you place a building tile between
+two independent building tiles. The three
+adjacent building tiles form a hotel chain.
+
+Immediately do the following:
+1. Choose a headquarters building from
+the stock market tray, and place it on
+any of the new connected building tiles.
+2. Take one stock card for that hotel chain.
+This is your founder’s bonus!
+If all seven headquarters buildings are already in play on the board,
+you may not place a building tile that will found a new hotel chain. You may,
+however, be able to play that tile later in the game if a headquarters
+building becomes available or if the tile would add on to an existing hotel
+chain or cause a merger.
+YOU MAKE A HOTEL CHAIN LARGER
+If you place a building tile next to any tile that is already part of a hotel chain,
+you have simply added a tile to that chain, making it one tile larger.
+The building tile you’re placing
+is adjacent to an existing hotel
+chain, so that chain grows larger.
+
+YOU MERGE TWO OR MORE HOTEL CHAINS TOGETHER
+If you place a building tile so that it connects two or more hotel chains, those
+hotel chains will merge and the smaller chain—that is, the one with fewer
+building tiles—becomes part of the larger chain. Remember, a hotel chain
+with eleven or more building tiles is safe and cannot be absorbed by another
+chain. Two safe hotel chains cannot merge.
+The building tile you’re placing is
+adjacent to building tiles in two different
+hotel chains, so those two chains merge.
+The building tile you’re placing is adjacent
+to building tiles in three different hotel
+chains, so all three merge together.
+The building tile you’re placing is not
+adjacent to any building tiles—it is
+on a diagonal—so there is no merger.
+But it will greatly increase the chances
+of those hotel chains merging in
+the future.
+
+When you merge two hotel chains, immediately do the following:
+1. Count the building tiles in each of the hotel chains involved. Do not count
+the building tile that caused the merger. You may temporarily flip the
+merging tile over so it is not accidentally counted. Once the merger is
+complete, flip it faceup.
+2. Remove the headquarters building from the smaller hotel chain and
+return it to the game tray. The smaller hotel chain has been acquired, and
+its building tiles are now part of the larger chain. If the hotel chains are the
+same size, the mergemaker gets to decide which chain survives and which
+one is acquired.
+3. Distribute stockholder bonuses for the acquired hotel chain as described
+on the next page. Note that there are no payouts for stock in the surviving
+hotel chain, but the value of its stock may go up because the chain has
+grown larger due to the merger.
+4. Starting with the mergemaker and moving clockwise, players with stock
+in the hotel chain that was acquired must do one or more of the following
+with that stock:
+1. Keep it in hand with the hope that a new hotel chain with the same
+name will be founded later in the game.
+2. Sell it back to the bank for the price indicated on the info card. The
+hotel chain’s name and size determine the selling price.
+3. Trade it in. For every two stocks from the acquired hotel chain, you get
+one stock in the surviving chain from the stock market tray.
+When you merge three or more hotel chains, the largest one survives and the
+smaller ones are acquired. The mergemaker breaks any ties. The smaller
+corporations are dealt with, one at a time, from largest to smallest.
+Stockholder bonuses are paid out as described on the next page. Stock in
+each acquired hotel chain is kept, sold, or traded, as described above. As
+usual, the mergemaker goes first.
+2. Buy Stocks
+After you place a building tile and resolve any mergers, you may (you don’t
+have to) buy up to three stocks in any active hotel chains from the stock market
+tray. You can buy multiple stocks in the same hotel chain and/or buy stocks in
+multiple chains during the same turn. Stock prices depend on the name and
+size of the hotel chain. When purchasing stock, players must announce what
+they are buying and how much they are paying. This is to help ensure that
+players don’t make mistakes with stock costs. At any time during the game, a
+player may ask how many stocks are in the stock market tray for any hotel chain.
+
+DETERMINING THE PRICE OF STOCKS
+To determine the price of a given stock:
+1. Find the name of that hotel chain
+on the stockholder info card.
+2. Look down the “Hotel Chain
+Size” column for that hotel chain
+and find the numbered row that
+corresponds with the number
+of building tiles currently in that
+hotel chain.
+3. Read across that row to find the
+“Buy/Sell Price Per Stock Card.”
+Do this for each hotel chain you’d like to buy stock in; then, pay the
+appropriate amount to the bank.
+RUNNING OUT OF MONEY
+It is possible to run out of money. If you run out of money, you may still place
+and draw building tiles each turn, but you may not purchase stock. You must
+wait until you receive a stockholder bonus or sell stocks in a hotel chain that has
+been acquired to get money. You can’t sell stocks in an active hotel chain at any
+point in the game, and no loans—either from players or the bank—are allowed.
+Avoid running out of money by investing wisely. You don’t have to be the
+majority stockholder in every corporation in order to win the game.
+3. Draw a Building Tile
+At the end of your turn, draw a building tile from the facedown pile.
+At the end of your turn, you may also check your building tiles to see if
+you have any that are unplayable. An unplayable building tile is one that
+would merge two or more safe hotel chains (which is not possible). Set any
+unplayable building tiles you have to the side (faceup) so they are out of play.
+Then, draw that many building tiles from the facedown pile. If you receive new
+unplayable building tiles, you must wait until your next turn to discard them.
+Note that building tiles that would form an eighth corporation are not
+considered unplayable, but cannot be played until there is a headquarters
+building available off the gameboard.
+
+DISTRIBUTING STOCKHOLDER BONUSES
+When you are determining stockholder bonuses for mergers, the merging
+building tile does not add to the size of either hotel chain. To determine
+stockholder bonuses, do the following:
+1. Determine who gets a bonus: Each player reveals the exact number of
+stocks they own in the hotel chain that was acquired. The players with the
+most, second-most, and third-most stocks are the primary, secondary,
+and tertiary stockholders, respectively. Players with no stocks in that hotel
+chain do not receive a bonus.
+A SINGLE STOCKHOLDER
+Classic Mode: If only one player owns stock in the acquired hotel chain,
+that player receives the primary and secondary bonuses.
+Tycoon Mode: If only one player owns stock in the acquired hotel chain,
+that player receives the primary and tertiary bonuses.
+A TIE
+Classic Mode: If there is a tie for primary shareholder, add the primary and
+secondary bonuses together, divide it evenly, and pay the bonus (rounded
+up to the nearest hundred) to the tied players. The secondary shareholder
+gets no bonus.
+If there is a tie for secondary shareholder, split the bonus among the tied
+players, rounding up to the nearest hundred.
+
+2. The banker pays out bonuses from the bank according to the
+stockholder info card. Here’s how to read the info card:
+1. Find the name of the hotel chain that was just acquired.
+2. Look down the “Hotel Chain Size” column for that hotel chain and
+find the numbered row that corresponds with the number of building
+tiles that were in that chain.
+3. Read across that row to find the primary, secondary, and tertiary
+shareholder bonuses for that hotel chain and size.
+Here are some examples of how to determine who gets what bonus.
+For the examples on the next page, imagine that Festival and Imperial have
+merged. Festival was the larger hotel chain because it had seven tiles and Imperial
+had only five, so Imperial has been acquired and its tiles become part of Festival.
+
+A STANDARD MERGER
+To determine stockholder bonuses, the players now count how many stocks
+they each own in Imperial. Liz owns three, Charlie owns two, and Courtney
+owns none. Because Liz has the most stocks, she gets the primary stockholder
+bonus. Charlie has the second-most, so he gets the secondary bonus.
+Courtney has no stocks in Imperial, so she gets no bonus. According to the
+chart on the stockholder info cards (see previous page), because Liz owns the
+most stock in Imperial and Imperial had five tiles, her primary shareholder
+bonus is 7000. Charlie’s secondary bonus is 5000.
+Sometimes, multiple players will have the same number of stocks in a hotel
+chain that has been acquired, and there will be a tie. Here are some examples
+of how to determine stockholder bonuses for ties using the above example
+merger between Festival and Imperial in a Tycoon Mode game.
+A TIE FOR PRIMARY STOCKHOLDER
+Imagine Liz owns three stocks in Imperial, Charlie owns three, and Courtney
+owns one. Liz and Charlie are tied for the primary bonus. Because Imperial
+had five tiles, the primary stockholder bonus is 7000 and the secondary
+stockholder bonus is 5000. Because they are tied, Liz and Charlie add the
+primary and secondary bonuses together (this equals 12000), and they split
+that value to get 6000 each. Courtney has the third highest stock count in
+Imperial, so she only gets the tertiary bonus of 3500.
+A TIE FOR SECONDARY STOCKHOLDER
+Imagine Liz owns three stocks in Imperial, Charlie owns two, and Courtney
+owns two. Because Imperial had five tiles, the primary bonus is 7000, and
+Liz gets that. The secondary bonus is 5000 and the tertiary bonus is 3500.
+Because they were tied for second, Charlie and Courtney add the secondary
+and tertiary bonuses together (this equals 8500), and they split that value to
+get 4300 each. If a fourth player, Amanda, owned one stock, that player would
+have the fourth highest stock count in Imperial and would not get a bonus.
+A TIE FOR TERTIARY STOCKHOLDER
+Imagine Liz owns four stocks in Imperial, Charlie owns three, Courtney owns
+one, and Amanda also owns one. Liz gets the primary bonus of 7000. Charlie
+gets the secondary bonus of 5000. Because they are tied for the third highest
+stock count in Imperial, Courtney and Amanda split the tertiary bonus, which
+is 3500. So Courtney and Amanda each get a bonus of 1800.
+
+THE END OF THE GAME
+The game ends when one player announces during their turn that either all
+active hotel chains are safe or that one active hotel chain is made up of 41 or
+more building tiles. A player does not have to announce that the game is over
+if it is to their advantage to keep playing—for example, to enlarge a hotel
+chain they own stock in. After making this announcement, that player finishes
+their turn as normal, then the game ends.
+As soon as the game ends, do the following:
+1. Pay out primary, secondary (and tertiary, if playing Tycoon Mode) stockholder
+bonuses for all active hotel chains according to the stockholder info card,
+the way you would pay out bonuses after a merger.
+2. Players sell all their stocks back to the bank at a price determined by the
+hotel chain’s name and size, as noted on the info card. Stocks in a hotel
+chain not on the board are worth nothing.
+3. Each player adds up their money, and the player with the most money
+wins! If there is a tie, the victory is shared.
+RARE CASES
+Founding a Hotel Chain with Zero Stock Available
+If a player places a building tile that would found a hotel chain, but all of that
+hotel chain’s stock is already taken, the founding player gets the founding
+bonus in cash payment equal to the value of the stock at the time of founding.
+Incorrect Building Tile Placement
+If a tile is placed in the wrong spot on the board and discovered on the turn it
+was placed, then it’s moved to the correct location. When an incorrect placement
+is discovered from a prior turn, that tile will remain in its current location. If the
+correct tile is held by a player, then exchange it for the incorrect tile.
+
