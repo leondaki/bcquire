@@ -50,17 +50,50 @@ func _process(_dt: float) -> bool:
 				eq(_scene.state.can_end_game(), true, "every active chain is now safe -> can end")
 				_step = 3
 		3:
-			# Drive into a merger so the merge-flash animation (MERGER_STARTED)
-			# also gets exercised, on a fresh hand-authored mid-game state.
+			# Drive into a merger on a fresh hand-authored mid-game state.
+			# Kind.MERGE placements never emit a TILE_PLACED event (see
+			# net/session.gd's _apply_place_tile) -- they go straight to
+			# MERGER_PENDING/MERGER_STARTED, neither of which animates
+			# anymore (game.gd's _play_event_animation), so nothing should be
+			# animating the instant this resolves.
 			_scene._generate_midgame()
 			_scene.session.send_action(Action.make_place_tile(0, Vector2i(4, 4)))   # merge: LUXOR + WORLDWIDE
-			eq(_scene._animating, true, "_animating is true immediately after the merge action")
-			_wait_until_msec = Time.get_ticks_msec() + 600
+			eq(_scene._animating, false, "no animation plays for the merge placement itself (MERGER_STARTED no longer animates)")
+			eq(_scene.state.phase, Phase.RESOLVE_MERGER, "merge landed in RESOLVE_MERGER as normal")
+			eq(_scene._disposal_queue.size(), 1, "only player 0's 1 WORLDWIDE share is owed a disposal decision")
 			_step = 4
 		4:
+			# Resolve the only pending disposal (keep the share). This empties
+			# the queue, so the engine emits MERGER_FINISHED, whose animation
+			# (game.gd's _animate_merger_finished) is the one this whole
+			# scenario exists to exercise: the survivor chain's color-fade
+			# should only start now, once the takeover is actually final.
+			var entry: Dictionary = _scene._disposal_queue[0]
+			_scene.session.send_action(Action.make_dispose_stock(entry.player, entry.defunct, 0, 0))
+			eq(_scene._animating, true, "_animating is true immediately after the disposal that finishes the merger")
+			# A defunct cell that was already showing WORLDWIDE's color before
+			# this turn (unlike (4,4), the merge tile itself, which was freshly
+			# placed and had no prior chain color to fade from) -- the bug this
+			# guards against is the fade silently starting from its own target
+			# color (a no-op) because an intervening _refresh_all() already
+			# repainted it; this fails loudly if that regresses.
+			var worldwide_cell: BoardCell = _scene._cells[Vector2i(5, 4)]
+			var start_bg: Color = worldwide_cell.get_theme_stylebox("normal").bg_color
+			eq(start_bg, _scene._theme.chain_color(Chain.WORLDWIDE),
+				"absorbed cell still shows the defunct chain's color the instant the fade starts")
+			_wait_until_msec = Time.get_ticks_msec() + 700
+			_step = 5
+		5:
 			if Time.get_ticks_msec() >= _wait_until_msec:
-				eq(_scene._animating, false, "_animating clears once the merge-flash animation finishes")
-				eq(_scene.state.phase, Phase.RESOLVE_MERGER, "merge landed in RESOLVE_MERGER as normal")
+				eq(_scene._animating, false, "_animating clears once the merger-finished color-fade completes")
+				eq(_scene.state.phase, Phase.BUY_STOCK, "merger fully resolved into BUY_STOCK")
+				var luxor_color: Color = _scene._theme.chain_color(Chain.LUXOR)
+				var merge_tile_cell: BoardCell = _scene._cells[Vector2i(4, 4)]
+				eq(merge_tile_cell.get_theme_stylebox("normal").bg_color, luxor_color,
+					"the merge tile's own cell now actually shows LUXOR's color")
+				var worldwide_cell: BoardCell = _scene._cells[Vector2i(5, 4)]
+				eq(worldwide_cell.get_theme_stylebox("normal").bg_color, luxor_color,
+					"the absorbed (formerly-WORLDWIDE) cell faded all the way to LUXOR's color")
 				get_root().remove_child(_scene)
 				_scene.queue_free()
 				print("==== %d passed, %d failed ====" % [passed, failed])

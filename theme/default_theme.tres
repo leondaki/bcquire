@@ -1,18 +1,8 @@
-[gd_resource type="Resource" script_class="ThemeDef" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="ThemeDef" format=3 uid="uid://pk54bxyotyr6"]
 
-[ext_resource type="Script" path="res://theme/theme_def.gd" id="1"]
+[ext_resource type="Script" uid="uid://cwqlv0dd1sfj5" path="res://theme/theme_def.gd" id="1"]
 
 [resource]
 script = ExtResource("1")
-board_width = 12
-board_height = 9
-tile_size = Vector2(52, 52)
-color_background = Color(0.09, 0.1, 0.13, 1)
-color_empty = Color(0.16, 0.18, 0.22, 1)
-color_lone_tile = Color(0.55, 0.58, 0.64, 1)
-color_hover = Color(0.3, 0.34, 0.42, 1)
-color_placed = Color(0.2, 0.55, 0.85, 1)
-color_playable = Color(0.92, 0.82, 0.28, 1)
-color_label = Color(0.92, 0.94, 0.97, 1)
 chain_names = PackedStringArray("Tower", "Luxor", "American", "Worldwide", "Festival", "Imperial", "Continental")
 chain_colors = PackedColorArray(0.95, 0.78, 0.2, 1, 0.85, 0.3, 0.25, 1, 0.22, 0.48, 0.86, 1, 0.52, 0.36, 0.66, 1, 0.3, 0.66, 0.42, 1, 0.92, 0.56, 0.2, 1, 0.22, 0.64, 0.7, 1)

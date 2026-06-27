@@ -1,5 +1,5 @@
 PROJECT STATE — Acquire Clone (Godot)
-Last updated: 2026-06-27
+Last updated: 2026-06-27 (audio system + merger color-fade animation fix)
 
 ================================================================================
 1. MAIN GOALS
@@ -174,9 +174,15 @@ FOLDER STRUCTURE (actual files on disk):
                                   until the tile-slide finishes and asserts
                                   _animating clears with the model exactly
                                   where the no-animation path already proves
-                                  correct, then repeats the same shape for a
-                                  MERGER_STARTED merge-flash animation.
-                                  10 assertions, 0 failures.
+                                  correct, then drives a full merge (place
+                                  the connecting tile, resolve the one
+                                  pending disposal) and asserts the color-
+                                  fade animation now tied to MERGER_FINISHED
+                                  (not MERGER_STARTED — see "Color-fade
+                                  animation layer" below) actually repaints
+                                  both the merge tile AND a true absorbed
+                                  cell from the defunct chain's color to the
+                                  survivor's. 16 assertions, 0 failures.
   sim/check_seat_gating.gd          Headless check for M4 Stage C's seat-
                                   gating: instances Game.tscn TWICE (ctrl_a =
                                   local seat 0, ctrl_b = local seat 1)
@@ -378,12 +384,9 @@ FOLDER STRUCTURE (actual files on disk):
     RackTile still shown pre-refresh to its BoardCell), _animate_stock_bought
     (STOCK_BOUGHT: slides from the buy-stepper card — tagged with
     set_meta("chain", ...) in _build_buy_card() so _find_buy_card_node() can
-    locate it — into the stock sidebar), and _animate_merger_started
-    (MERGER_STARTED: a brief modulate flash over every BoardCell the
-    survivor chain now occupies — queried post-mutation since the host
-    already applied the real merge before broadcasting, so this
-    intentionally flashes the whole chain rather than tracking exactly which
-    cells just changed hands). A bool, _animations_enabled (default true),
+    locate it — into the stock sidebar), and (superseded — see "Color-fade animation layer" below)
+    a merger flash that has since been replaced entirely. A bool,
+    _animations_enabled (default true),
     gates _play_event_animation() entirely; every headless sim/check_*.gd
     script that drives session.send_action() against a real Game.tscn
     instance sets it false immediately after instantiating, keeping those
@@ -423,6 +426,69 @@ FOLDER STRUCTURE (actual files on disk):
     whole VBoxContainer for a dead tile + its Redraw button) rather than
     reaching into the RackTile alone, so a dead tile's Redraw button slides
     as one unit with it instead of tearing away mid-tween.
+
+  - Audio/SFX system: audio/sfx_manager.gd, a scene-based autoload
+    ("SfxManager" in project.godot's [autoload], pointing at
+    audio/SfxManager.tscn rather than the script directly) so every sound
+    slot is an @export AudioStream the Inspector can drag-and-drop a
+    replacement onto, with zero code edits. Slots: sfx_tile, sfx_merger,
+    sfx_chain_founded, sfx_stepper, sfx_button, plus a looping music track
+    routed through its own runtime-created "Music" audio bus (separate
+    volume control from one-shot SFX). An 8-player round-robin pool
+    (AudioStreamPlayer x8) backs play(key) so overlapping sounds don't cut
+    each other off. Wired into ui/game/game.gd at: TILE_PLACED (play_tile),
+    MERGER_STARTED (play_merger), CHAIN_FOUNDED (play_chain_founded), the
+    buy-phase +/- steppers and dispose-phase spinboxes (play_stepper), and
+    the two shared button factories _chain_button()/_bordered_button() plus
+    the handful of raw Button.new() sites that bypass them (play_button).
+    chain-founded.mp3 added alongside the four originally-wired sounds
+    (tile-played.ogg, merger-played.ogg, stepper.ogg, button-click.ogg) and
+    The_Closing_Bell.mp3 (background music). All five/six asset files have
+    .import/.uid sidecars generated via --import. Commit: 52f86c7 (default
+    theme also switched to Classic as part of this commit).
+  - Color-fade animation layer (replaces an earlier shine/wave effect that
+    was built, then explicitly removed per user request — see below). Every
+    chain-color change a player can see is now a plain parallel
+    StyleBoxFlat.bg_color tween (_animate_chain_color_fade(), 0.4s,
+    TRANS_SINE/EASE_IN_OUT, no flash/shine, no stagger) across three
+    triggers in ui/game/game.gd:
+      - Chain founding (_animate_chain_founded, on Event.CHAIN_FOUNDED):
+        fades every cell of the newly-founded chain from whatever it's
+        currently showing.
+      - Growing an existing chain (_animate_tile_placed, on
+        Event.TILE_PLACED when payload.kind == Kind.GROW): fades just the
+        one newly-placed cell.
+      - A merger actually finishing (_animate_merger_finished, on
+        Event.MERGER_FINISHED — deliberately NOT Event.MERGER_STARTED):
+        fades every cell the survivor chain now occupies (queried post-
+        mutation via _chain_cellnodes(survivor)) from each cell's real
+        pre-merger color.
+    The MERGER_FINISHED timing was itself a user-reported bug fix: the
+    takeover isn't real to the player until every shareholder has resolved
+    their defunct stock (sell/trade/keep), so animating any earlier (e.g.
+    at MERGER_STARTED, the previous design) visually "absorbed" the
+    defunct chain into the survivor before that resolution even began.
+    Getting the merger fade to actually show anything also required fixing
+    a second bug: state.merger_begin() (run at MERGER_STARTED time) never
+    reassigns any cells — only state.merger_finish() does, and that only
+    runs once the disposal queue is empty, in the same event batch as the
+    final STOCK_DISPOSED/MERGER_FINISHED events. A first snapshot attempt
+    queried _chain_cellnodes(survivor) (cells where state.cell()==survivor)
+    at MERGER_STARTED time to capture "before" colors, but at that moment
+    the defunct chain's cells don't equal survivor yet, so the snapshot
+    silently excluded every absorbed cell — the fade ran but only repainted
+    cells that were already the right color, making it look like merger
+    fades didn't work at all. Fixed by _snapshot_merge_pre_colors(survivor,
+    defuncts) (called from the MERGER_STARTED handler in _apply_event_ui,
+    using event.payload.defuncts) snapshotting cells by chain id —
+    [survivor] + defuncts — instead of by "what already equals survivor",
+    into a Vector2i -> Color dict (_merge_pre_colors) that
+    _animate_merger_finished() reads via _animate_chain_color_fade()'s
+    from_colors parameter. sim/check_animations.gd's merger case was
+    extended specifically to catch this class of bug: it asserts a true
+    absorbed cell (not just the newly-placed merge tile) shows the defunct
+    chain's color the instant the fade starts and the survivor's color once
+    it finishes. Not yet committed — see PROJECT-LEVEL CONSTRAINTS.
 
 IN PROGRESS:
   - "Presentation polish" plan (main menu -> animation layer -> retheme
@@ -724,7 +790,7 @@ PROJECT-LEVEL CONSTRAINTS:
     Current expected output: "==== 77 passed, 0 failed ====",
     "==== 18 passed, 0 failed ====", a convergence-test pass count with
     0 failed, "==== 20 passed, 0 failed ====", "==== 18 passed,
-    0 failed ====", "==== 10 passed, 0 failed ====", and "==== 23 passed,
+    0 failed ====", "==== 16 passed, 0 failed ====", and "==== 23 passed,
     0 failed ====", all exit code 0.
     sim/check_animations.gd takes noticeably longer than the others (well
     under a second, but non-zero) since it's the one script that lets real

@@ -1,6 +1,8 @@
-[gd_resource type="Resource" script_class="FantasyTheme" load_steps=2 format=3]
+[gd_resource type="Resource" script_class="FantasyTheme" format=3 uid="uid://cuvfm2l0g7ofg"]
 
-[ext_resource type="Script" path="res://theme/fantasy_theme.gd" id="1"]
+[ext_resource type="Script" uid="uid://bx6qnkbvio402" path="res://theme/fantasy_theme.gd" id="1"]
 
 [resource]
 script = ExtResource("1")
+chain_names = null
+chain_colors = null

@@ -1,0 +1,18 @@
+[gd_scene format=3 uid="uid://dq6c1vqxs1xkj"]
+
+[ext_resource type="Script" uid="uid://b2t4vgm71p6t3" path="res://audio/sfx_manager.gd" id="1_sfx"]
+[ext_resource type="AudioStream" uid="uid://buwd1mgn8a5id" path="res://audio/tile-played.ogg" id="2_tile"]
+[ext_resource type="AudioStream" uid="uid://crq7k45qy0sfy" path="res://audio/merger-played.ogg" id="3_merger"]
+[ext_resource type="AudioStream" uid="uid://14r2akgg2nkt" path="res://audio/stepper.ogg" id="4_stepper"]
+[ext_resource type="AudioStream" uid="uid://xnflxuq0awqa" path="res://audio/button-click.ogg" id="5_button"]
+[ext_resource type="AudioStream" uid="uid://b38uaptiowcgw" path="res://audio/The_Closing_Bell.mp3" id="6_music"]
+[ext_resource type="AudioStream" uid="uid://nvsaxi2bu7g1" path="res://audio/chain-founded.mp3" id="7_chain_founded"]
+
+[node name="SfxManager" type="Node" unique_id=1882103346]
+script = ExtResource("1_sfx")
+sfx_tile = ExtResource("2_tile")
+sfx_merger = ExtResource("3_merger")
+sfx_chain_founded = ExtResource("7_chain_founded")
+sfx_stepper = ExtResource("4_stepper")
+sfx_button = ExtResource("5_button")
+music = ExtResource("6_music")

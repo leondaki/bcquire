@@ -61,6 +61,14 @@ var _merge_mode := ""                     # "" | "tie" | "dispose"
 var _merge_candidates: Array = []         # tied survivor choices
 var _merge_survivor: int = Chain.NONE
 var _disposal_queue: Array = []           # [{ "defunct", "player" }]
+## Snapshot of each absorbed cell's pre-merge displayed color, taken right
+## before MERGER_STARTED's own _refresh_all() repaints them -- the dispose
+## phase's STOCK_DISPOSED events each call _refresh_all() too (to keep the
+## board accurate while shareholders resolve), which would otherwise have
+## already overwritten every cell with the survivor's color long before
+## MERGER_FINISHED's animation gets a chance to read a "before" value. See
+## _animate_merger_finished().
+var _merge_pre_colors: Dictionary = {}    # Vector2i -> Color
 var _buy_counts := {}                     # chain -> shares queued this buy phase
 var _final_scores: Array = []
 
@@ -669,6 +677,7 @@ func _apply_event_ui(event: Dictionary) -> void:
 			_pending_coord = p.coord
 			_refresh_all()
 		Event.CHAIN_FOUNDED:
+			SfxManager.play_chain_founded()
 			_msg("Founded %s! You receive 1 founder's %s." % [_theme.chain_name(p.chain), _theme.term_stock.to_lower()])
 			_refresh_all()
 		Event.MERGER_PENDING:
@@ -681,6 +690,17 @@ func _apply_event_ui(event: Dictionary) -> void:
 			_merge_survivor = p.survivor
 			_disposal_queue = p.disposal_queue.duplicate(true)
 			_merge_mode = "dispose"
+			# state.merger_begin() (already run server-side, before this event
+			# was even emitted) only pays bonuses and records who owes a
+			# disposal decision -- it does NOT reassign any cells yet. Real
+			# cell ownership only flips inside state.merger_finish(), which
+			# net/session.gd's _apply_dispose_stock() runs once every
+			# shareholder has resolved, right before broadcasting
+			# MERGER_FINISHED. So right now, every defunct chain's cells still
+			# show their own original color -- the last moment that's true --
+			# which is exactly what _animate_merger_finished() needs as its
+			# "before" picture once the takeover is actually final.
+			_snapshot_merge_pre_colors(p.survivor, p.defuncts)
 			var names: Array = []
 			for d in p.defuncts:
 				names.append(_theme.chain_name(d))
@@ -747,27 +767,34 @@ func _play_event_animation(event: Dictionary) -> void:
 			await _animate_tile_placed(event)
 		Event.STOCK_BOUGHT:
 			await _animate_stock_bought(event)
-		Event.MERGER_STARTED:
-			await _animate_merger_started(event)
+		Event.MERGER_FINISHED:
+			await _animate_merger_finished(event)
+		Event.CHAIN_FOUNDED:
+			await _animate_chain_founded(event)
 		_:
 			pass
 
-## On a successful placement, the tile snaps into place instantly (no animation)
+## On a successful placement, the tile snaps into place instantly (no slide)
 ## because it was already hidden from the hand during the drag gesture. On a
 ## failed drop, no event fires, so this never runs. The hand's reflow animation
-## when the tile reappears is sufficient visual feedback.
+## when the tile reappears is sufficient visual feedback for that part.
+##
+## When the placement grows an existing chain (Kind.GROW), the single newly-
+## placed cell also gets the color-fade below, since it's the one cell whose
+## color is actually changing -- the rest of the chain already shows the
+## right color and doesn't need to animate.
 func _animate_tile_placed(event: Dictionary) -> void:
 	var coord: Vector2i = event.payload.coord
-	var src := _find_rack_tile_node(coord)
 	var dst: BoardCell = _cells.get(coord)
-	if src == null or dst == null:
-		return
+	var src := _find_rack_tile_node(coord)
 	# If the source tile is not visible, it was lifted in a successful drag.
 	# Skip the slide animation — the tile is already gone from the hand and will
-	# appear on the board after the next refresh.
-	if not src.visible:
-		return
-	await _slide_visual(AcqEnums.tile_label(coord.x, coord.y), src.global_position, dst.global_position, src.size)
+	# appear on the board after the next refresh — but still run the color fade
+	# below if applicable.
+	if src != null and dst != null and src.visible:
+		await _slide_visual(AcqEnums.tile_label(coord.x, coord.y), src.global_position, dst.global_position, src.size)
+	if dst != null and event.payload.kind == Kind.GROW:
+		await _animate_chain_color_fade([dst], event.payload.chain)
 
 ## Slides a duplicate-styled card from the buy-stepper card the player just
 ## used into the stock sidebar. The new StockCard doesn't exist yet (that's
@@ -783,26 +810,98 @@ func _animate_stock_bought(event: Dictionary) -> void:
 		return
 	await _slide_visual(_theme.chain_name(chain), src.global_position, _stock_box.global_position, src.size)
 
-## Brief bright flash over every cell the merger's survivor chain now
-## occupies (queried post-mutation, since the host already applied the real
-## merge before broadcasting this event) — a simplification that flashes the
-## whole chain rather than tracking exactly which cells just changed hands,
-## but reads the same to a player watching the board.
-func _animate_merger_started(event: Dictionary) -> void:
-	var survivor: int = event.payload.survivor
+## Color-fade over every cell the just-finished merger's survivor chain now
+## occupies (queried off _merge_survivor, which _apply_event_ui's earlier
+## MERGER_STARTED handling already populated and won't clear until after
+## this animation runs). Deliberately tied to MERGER_FINISHED rather than
+## MERGER_STARTED: the takeover isn't real to the player until every
+## shareholder has actually resolved their defunct stock (sell/trade/keep),
+## so animating any earlier showed the board "absorbing" the defunct chain
+## before that resolution even began.
+##
+## Uses _merge_pre_colors (snapshotted at MERGER_STARTED, before its own
+## _refresh_all() ran) as each cell's starting color instead of whatever the
+## cell is showing right now -- by MERGER_FINISHED, one or more STOCK_DISPOSED
+## events have already called _refresh_all() themselves (to keep the board
+## accurate while shareholders resolve their disposal), which already
+## repainted every absorbed cell to the survivor's color. Reading "current"
+## color at this point would just be fading the target color into itself.
+func _animate_merger_finished(event: Dictionary) -> void:
+	if _merge_survivor == Chain.NONE:
+		return
+	await _animate_chain_color_fade(_chain_cellnodes(_merge_survivor), _merge_survivor, _merge_pre_colors)
+	_merge_pre_colors = {}
+
+## Same color-fade, played over the newly-founded chain's cells (queried
+## post-mutation, same as the merger-finished animation above). No pre-color
+## snapshot needed here -- chain founding has no intervening events/refreshes
+## between the mutation and this animation, so each cell's live displayed
+## color (read inside _animated_stylebox()) is still the real "before".
+func _animate_chain_founded(event: Dictionary) -> void:
+	var chain: int = event.payload.chain
+	await _animate_chain_color_fade(_chain_cellnodes(chain), chain)
+
+func _chain_cellnodes(chain: int) -> Array:
 	var cellnodes: Array = []
 	for coord in _cells.keys():
-		if state.cell(coord.x, coord.y) == survivor:
+		if state.cell(coord.x, coord.y) == chain:
 			cellnodes.append(_cells[coord])
+	return cellnodes
+
+## Captures every cell that will end up belonging to `survivor` once the
+## merger actually finishes -- its own existing cells plus every `defuncts`
+## chain's cells -- along with whatever color each is showing right now
+## (still each chain's own real color; state.merger_finish() hasn't reassigned
+## any of them yet at this point, see the MERGER_STARTED case above). Read by
+## _animate_merger_finished() once the merger is actually fully resolved.
+func _snapshot_merge_pre_colors(survivor: int, defuncts: Array) -> void:
+	_merge_pre_colors = {}
+	for chain in [survivor] + defuncts:
+		for cellnode in _chain_cellnodes(chain):
+			var sb := cellnode.get_theme_stylebox("normal") as StyleBoxFlat
+			_merge_pre_colors[Vector2i(cellnode.col, cellnode.row)] = sb.bg_color if sb else _theme.color_empty
+
+const COLOR_FADE_DURATION := 0.4
+
+## Fades every cell in `cellnodes`'s displayed background to `chain`'s color,
+## all in parallel -- no flash, no stagger, just the color change itself,
+## made visible instead of an instant cut. Each cell's starting color is
+## `from_colors[coord]` if given (see _snapshot_merge_pre_colors() above),
+## otherwise whatever the cell is currently showing.
+func _animate_chain_color_fade(cellnodes: Array, chain: int, from_colors: Dictionary = {}) -> void:
 	if cellnodes.is_empty():
 		return
+	var target_color := _theme.chain_color(chain)
 	var tween := create_tween()
 	tween.set_parallel(true)
 	for cellnode in cellnodes:
-		cellnode.modulate = Color(1.6, 1.6, 1.0)
-		tween.tween_property(cellnode, "modulate", Color.WHITE, 0.35) \
-			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		var coord := Vector2i(cellnode.col, cellnode.row)
+		var sb := _animated_stylebox(cellnode, from_colors.get(coord))
+		tween.tween_property(sb, "bg_color", target_color, COLOR_FADE_DURATION) \
+			.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
 	await tween.finished
+
+## Installs one fresh, tweenable StyleBoxFlat as the cell's normal/hover/
+## pressed override (board input is locked for the whole animation, so the
+## three states never need to look different mid-animation) and returns it.
+## Starting bg_color is `from_color_override` if given, otherwise whatever
+## the cell's current "normal" override already shows (still the pre-
+## mutation color when there's been no intervening refresh -- see the
+## per-event-type comments above for which case applies when).
+func _animated_stylebox(cellnode: BoardCell, from_color_override: Variant = null) -> StyleBoxFlat:
+	var existing := cellnode.get_theme_stylebox("normal") as StyleBoxFlat
+	var sb := StyleBoxFlat.new()
+	if from_color_override != null:
+		sb.bg_color = from_color_override
+	else:
+		sb.bg_color = existing.bg_color if existing else _theme.color_empty
+	sb.border_color = existing.border_color if existing else _theme.color_label
+	sb.set_border_width_all(existing.get_border_width(SIDE_LEFT) if existing else 1)
+	sb.set_corner_radius_all(4)
+	cellnode.add_theme_stylebox_override("normal", sb)
+	cellnode.add_theme_stylebox_override("hover", sb)
+	cellnode.add_theme_stylebox_override("pressed", sb)
+	return sb
 
 ## Spawns a transient label-on-panel on the FX layer and tweens it from
 ## from_pos to to_pos (both global positions), freeing it when done.
