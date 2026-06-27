@@ -1,5 +1,5 @@
 PROJECT STATE — Acquire Clone (Godot)
-Last updated: 2026-06-26
+Last updated: 2026-06-27
 
 ================================================================================
 1. MAIN GOALS
@@ -177,6 +177,32 @@ FOLDER STRUCTURE (actual files on disk):
                                   correct, then repeats the same shape for a
                                   MERGER_STARTED merge-flash animation.
                                   10 assertions, 0 failures.
+  sim/check_seat_gating.gd          Headless check for M4 Stage C's seat-
+                                  gating: instances Game.tscn TWICE (ctrl_a =
+                                  local seat 0, ctrl_b = local seat 1)
+                                  sharing one hand-authored GameState object
+                                  assigned directly to both controllers'
+                                  state/session.state fields, with
+                                  hotseat_mode = false on both sessions.
+                                  Proves _rebuild_action_area()/
+                                  can_drag_tiles() gate the right seat across
+                                  PLACE_TILE/FOUND_CHAIN/BUY_STOCK (all three
+                                  share one _is_my_turn() check) and that
+                                  RESOLVE_MERGER's dispose sub-mode gates per-
+                                  shareholder via _is_my_seat() on
+                                  _disposal_queue[0].player, independent of
+                                  state.current_player. Also pins
+                                  can_drop_tile()'s current contract: no seat
+                                  check of its own, relies entirely on
+                                  can_drag_tiles() (via
+                                  RackTile._get_drag_data()) having already
+                                  refused to start the drag for an inactive
+                                  seat. No real session.send_action() calls —
+                                  every mutation is direct state/controller-
+                                  field assignment + _refresh_all(), the same
+                                  technique _generate_midgame()/
+                                  _generate_near_endgame() already use.
+                                  23 assertions, 0 failures.
 
   theme/theme_def.gd                ThemeDef resource script: board_width/
                                   height, tile_size, full color palette incl.
@@ -401,14 +427,14 @@ FOLDER STRUCTURE (actual files on disk):
 IN PROGRESS:
   - "Presentation polish" plan (main menu -> animation layer -> retheme
     groundwork, in that user-chosen order; M4 Stages A-B and the end-game
-    flow were already done before this plan started). Stage 1 (main menu /
-    NetConfig) and Stage 2 (animation layer) are DONE — see their full
-    writeups above under 100% COMPLETE. Stage 3 (retheme groundwork) is
-    NOT STARTED and is the next task on the table — see "NEXT MILESTONES"
-    below for its scope. All six headless suites green (run_tests.gd 77/77,
-    check_midgame.gd 18/18, run_network_tests.gd convergence test,
-    check_near_endgame.gd 20/20, check_menu_flow.gd 18/18,
-    check_animations.gd 10/10 — see section 4 for how to run all of them).
+    flow were already done before this plan started). All three stages are
+    now DONE — see their full writeups above/below under 100% COMPLETE /
+    COMPLETED MILESTONES. M4 has since progressed through Stage C as well
+    (see "NEXT MILESTONES" below for live status). All seven headless suites
+    green (run_tests.gd 77/77, check_midgame.gd 18/18, run_network_tests.gd
+    convergence test, check_near_endgame.gd 20/20, check_menu_flow.gd 18/18,
+    check_animations.gd 10/10, check_seat_gating.gd 23/23 — see section 4 for
+    how to run all of them).
 
 COMPLETED MILESTONES:
   1. Presentation polish, Stage 3 — retheme groundwork. ✅ COMPLETE.
@@ -421,9 +447,31 @@ COMPLETED MILESTONES:
      Verification: all 6 headless suites pass; default theme produces identical
      UI text as before (pure refactor); fantasy_theme.gd is now a drop-in
      medieval re-skin ready for testing.
+  2. M5 — Theming pass. ✅ COMPLETE. fantasy_theme.gd as authored in Stage 3
+     didn't actually load: it redeclared @export fields (color_background,
+     color_empty, etc.) already present on its parent ThemeDef, which
+     GDScript rejects outright ("member already exists in parent class").
+     Fixed by setting those fields' values in _init() instead of redeclaring
+     them, and diversified chain_colors away from mostly-gold into seven
+     distinct hues (steel gray/amber gold/crimson red/deep blue/forest
+     green/royal purple/dark teal). Added theme/fantasy_theme.tres (the
+     loadable resource pointing at the fixed script) and a footer button in
+     ui/game/game.gd ("Switch to Classic/Fantasy Theme") that swaps the
+     active ThemeDef and rebuilds the UI at runtime — purely cosmetic, never
+     touches GameState. The rebuild is deferred via call_deferred() rather
+     than run inline in the button's own pressed handler, since freeing the
+     button's node tree (which _build_layout() does on every rebuild) while
+     still mid-emission of that same button's "pressed" signal crashes the
+     engine — Godot's own error for this names the fix. Disabled while
+     networked (_is_networked), since a rebuild would reset the network-
+     status row's live text back to its just-built default and that text
+     has no single source of truth to recompute from. Commit: 77fe9ec.
+     Verification: all 6 headless suites pass (this is UI-only, no engine
+     change); confirmed via --import that FantasyTheme registers with no
+     compile errors.
 
 NEXT MILESTONES (in order):
-  2. M4 — Networked multiplayer. Staged per net/session.gd's host-
+  1. M4 — Networked multiplayer. Staged per net/session.gd's host-
      authoritative design (full plan: a now-historical plan doc; this section
      is the live status).
        STAGE A — DONE: Action/Event plumbing + loopback transport + the
@@ -508,48 +556,53 @@ NEXT MILESTONES (in order):
              verification here is the manual two-window LAN checklist
              (now-historical plan doc has the original script; section 4
              below keeps the live version).
-       STAGE C — NOT STARTED: verify seat-gating (_is_my_turn/_is_my_seat)
-         actually disables the right controls once Stage B's hotseat_mode is
-         false; sim/check_seat_gating.gd. Concrete plan (no real networking
-         needed — this tests game.gd's UI-gating logic, not engine
-         convergence, which run_network_tests.gd already covers):
-           1. Instance Game.tscn twice (ctrl_a = seat 0, ctrl_b = seat 1),
-             deferring one process tick each per the usual check_*.gd gotcha
-             (section 4). Set _animations_enabled = false on both.
-           2. Build ONE shared hand-authored GameState scenario (reuse/adapt
-             _generate_midgame()'s style) and assign it to both controllers'
-             `state` field AND `session.state`, exactly like the existing
+       STAGE C — DONE: verify seat-gating (_is_my_turn/_is_my_seat) actually
+         disables the right controls once Stage B's hotseat_mode is false;
+         sim/check_seat_gating.gd (23 assertions, 0 failures). No real
+         networking needed — this tests game.gd's UI-gating logic, not
+         engine convergence, which run_network_tests.gd already covers.
+           - Two Game.tscn instances (ctrl_a = local seat 0, ctrl_b = local
+             seat 1), each deferred one process tick per the usual
+             check_*.gd gotcha (section 4), share ONE hand-authored
+             GameState object assigned directly to both controllers'
+             `state`/`session.state` fields, exactly like the existing
              dev-harness pattern (`ctrl.state = state; ctrl.session.state =
              state` — see _generate_midgame()/_generate_near_endgame()).
-           3. On both sessions set hotseat_mode = false; set
-             ctrl_a.session.local_player_index = 0 and
-             ctrl_b.session.local_player_index = 1.
-           4. With state.current_player = 0: assert ctrl_a.can_drag_tiles()
-             is true and ctrl_a._rebuild_action_area() builds real PLACE_TILE
-             controls (not a waiting label) in _action_box; assert
-             ctrl_b.can_drag_tiles() is false and ctrl_b's action box shows
-             the "Waiting for ...'s move" label instead.
-           5. Flip state.current_player = 1 and re-assert the opposite for
-             both controllers — confirms the gating isn't hardcoded to seat 0.
-           6. Repeat the same shape for FOUND_CHAIN and BUY_STOCK phases
-             (both gated by the same _is_my_turn() check at
-             _rebuild_action_area()'s top) by mutating state.phase directly
-             in the shared scenario.
-           7. Cover the one phase gated DIFFERENTLY — RESOLVE_MERGER's
-             dispose sub-mode is per-shareholder via _is_my_seat(), not
-             per-current-player (see _rebuild_action_area()'s comment): build
-             a _disposal_queue with player 1 owed a decision while
-             state.current_player is still 0, and assert ctrl_a (seat 0) gets
-             the waiting label even though it's "their turn" engine-wise,
-             while ctrl_b (seat 1) gets the real dispose controls.
-           8. While in there, double-check can_drop_tile() defensively — it
-             currently has no _is_my_turn() check of its own (relies on the
-             fact that a drag can only start if can_drag_tiles() already
-             passed, since BoardCell's _can_drop_data only fires mid an
-             active local drag). Safe today by construction, but add an
-             explicit assertion in the test pinning that invariant so a
-             future refactor that decouples drag-start from this check
-             doesn't silently regress it.
+             Both sessions get hotseat_mode = false and their own
+             local_player_index (0 / 1).
+           - PLACE_TILE/FOUND_CHAIN/BUY_STOCK are all gated by the exact same
+             one-line _is_my_turn() check at _rebuild_action_area()'s top, so
+             one shared scenario is mutated phase-to-phase
+             (state.phase/state.current_player flipped directly) rather than
+             rebuilt three times: with current_player = 0, ctrl_a sees real
+             phase controls and can_drag_tiles() is true (PLACE_TILE only)
+             while ctrl_b sees the "Waiting for ...'s move" label; flipping
+             current_player = 1 reverses both, confirming the gate isn't
+             hardcoded to seat 0.
+           - RESOLVE_MERGER's dispose sub-mode is gated per-shareholder via
+             _is_my_seat() on _disposal_queue[0].player, NOT per-current-
+             player: with state.current_player deliberately left at 0 and a
+             _disposal_queue entry owed to player 1, ctrl_a (seat 0) still
+             gets the waiting label despite "owning" current_player, while
+             ctrl_b (seat 1) gets the real dispose SpinBoxes.
+             _merge_mode/_disposal_queue/_merge_survivor are controller-local
+             fields (not on GameState), set independently on each controller.
+           - can_drop_tile()'s contract is pinned explicitly: it has its own
+             substantial guard (data-shape, phase/animating, coord-match,
+             placement-legality) but no seat check of its own — called
+             directly for an inactive seat's own legal tile, it returns true,
+             proving the seat gate lives solely in can_drag_tiles() (via
+             RackTile._get_drag_data(), which refuses to return drag data at
+             all when can_drag_tiles() is false). A future refactor that adds
+             a seat check inside can_drop_tile() must flip this assertion.
+           - No real session.send_action() calls or extra event_applied
+             wiring: every mutation is direct state/controller-field
+             assignment + _refresh_all(), the same technique
+             _generate_midgame()/_generate_near_endgame() already use test-
+             side — driving real Actions would need a second
+             LoopbackHub/LoopbackTransport pair connecting the two sessions
+             for no payoff, since convergence is already
+             run_network_tests.gd's job.
        STAGE D — NOT STARTED: ai/bot_player.gd, a simple rule-based bot that
          calls session.send_action() like any other seat, for solo seat-
          filling; sim/check_bot_game.gd.
@@ -585,14 +638,7 @@ NEXT MILESTONES (in order):
          process session doesn't hit a duplicate-node or stale-RPC-binding
          issue. Untested today since every session so far has been single-
          game-then-quit.
-  3. M5 — Theming pass. Author a second ThemeDef (different name/art) to
-     prove the re-skin path requires zero core/ or ui/ logic changes. This is
-     the user's stated medieval-fantasy "pay gold for influence in kingdoms"
-     skin; do this AFTER presentation-polish Stage 3 (above) lands, since
-     that stage is exactly the prerequisite groundwork (routing the
-     remaining hardcoded strings through ThemeDef) this milestone needs to
-     be a pure-content change.
-  4. M6 — Steam packaging. GodotSteam integration (steam_transport.gd behind
+  2. M6 — Steam packaging. GodotSteam integration (steam_transport.gd behind
      the same network_transport.gd interface), Steam App ID + steam_appid.txt
      for local testing, Windows + Linux export presets, Steam Deck input/
      resolution pass, steamcmd depot upload docs.
@@ -664,7 +710,7 @@ PROJECT-LEVEL CONSTRAINTS:
   - Windows machine; PowerShell is the shell tool used for all Godot CLI
     invocations (Bash tool also available, both work, PowerShell used in
     practice throughout this project's history).
-  - Always re-run ALL SIX headless suites after any change to core/,
+  - Always re-run ALL SEVEN headless suites after any change to core/,
     net/, ui/game/game.gd, or ui/menu/menu.gd before declaring work done:
       godot --headless --path <proj> --import   (only needed if a new
         class_name was added/removed; harmless to always run)
@@ -674,10 +720,12 @@ PROJECT-LEVEL CONSTRAINTS:
       godot --headless --path <proj> --script sim/check_near_endgame.gd
       godot --headless --path <proj> --script sim/check_menu_flow.gd
       godot --headless --path <proj> --script sim/check_animations.gd
+      godot --headless --path <proj> --script sim/check_seat_gating.gd
     Current expected output: "==== 77 passed, 0 failed ====",
     "==== 18 passed, 0 failed ====", a convergence-test pass count with
     0 failed, "==== 20 passed, 0 failed ====", "==== 18 passed,
-    0 failed ====", and "==== 10 passed, 0 failed ====", all exit code 0.
+    0 failed ====", "==== 10 passed, 0 failed ====", and "==== 23 passed,
+    0 failed ====", all exit code 0.
     sim/check_animations.gd takes noticeably longer than the others (well
     under a second, but non-zero) since it's the one script that lets real
     Tweens run across real frames/time instead of disabling animations — see
@@ -685,5 +733,4 @@ PROJECT-LEVEL CONSTRAINTS:
     still in use at exit" warnings on process exit are pre-existing noise
     from headless scripts loading scenes/resources without explicit
     cleanup — not a regression signal; only the failed-count and exit code
-    matter.) sim/check_seat_gating.gd and sim/check_bot_game.gd will join
-    this list once M4 Stages C/D land.
+    matter.) sim/check_bot_game.gd will join this list once M4 Stage D lands.
