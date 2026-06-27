@@ -636,15 +636,20 @@ func _play_event_animation(event: Dictionary) -> void:
 		_:
 			pass
 
-## Slides a duplicate-styled tile from its rack position to its board cell.
-## Runs before _refresh_all() tears the real rack tile down, so both the
-## source (still-current rack node) and destination (persistent BoardCell)
-## positions are exactly where the player saw them.
+## On a successful placement, the tile snaps into place instantly (no animation)
+## because it was already hidden from the hand during the drag gesture. On a
+## failed drop, no event fires, so this never runs. The hand's reflow animation
+## when the tile reappears is sufficient visual feedback.
 func _animate_tile_placed(event: Dictionary) -> void:
 	var coord: Vector2i = event.payload.coord
 	var src := _find_rack_tile_node(coord)
 	var dst: BoardCell = _cells.get(coord)
 	if src == null or dst == null:
+		return
+	# If the source tile is not visible, it was lifted in a successful drag.
+	# Skip the slide animation — the tile is already gone from the hand and will
+	# appear on the board after the next refresh.
+	if not src.visible:
 		return
 	await _slide_visual(AcqEnums.tile_label(coord.x, coord.y), src.global_position, dst.global_position, src.size)
 
