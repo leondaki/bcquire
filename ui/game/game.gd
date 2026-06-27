@@ -693,7 +693,16 @@ func _apply_event_ui(event: Dictionary) -> void:
 			_final_scores = p.final_scores
 			_refresh_all()
 		Event.ACTION_REJECTED:
+			# _apply_one_event() unconditionally calls _lock_action_box()
+			# before dispatching here, on the assumption every event leads to
+			# a _refresh_all() that rebuilds the action box with fresh,
+			# enabled controls. A rejection is the one event type where
+			# nothing about state actually changed, so without this
+			# _refresh_all() call the buttons _lock_action_box() just
+			# disabled (e.g. "End Turn") would stay disabled forever —
+			# looking to the player like the option vanished.
 			_msg(p.reason)
+			_refresh_all()
 
 # ===========================================================================
 #  Animation layer (Stage 2)
@@ -899,15 +908,20 @@ func _refresh_rack() -> void:
 		var is_dead := state.is_dead_tile(tile.x, tile.y)
 		if is_dead:
 			# Permanently-dead tile: red, with its own redraw button beneath it.
-			# Only usable on the viewer's own turn — the engine only accepts a
-			# redraw from state.current_player, and outside hotseat_mode the
-			# rack shown here may belong to a seat whose turn it isn't.
+			# Only usable on the viewer's own turn during PLACE_TILE — the
+			# engine only accepts a redraw from state.current_player while
+			# phase == PLACE_TILE (net/session.gd's _apply_redraw_tile), and
+			# outside hotseat_mode the rack shown here may belong to a seat
+			# whose turn it isn't. Gating on phase here too (not just
+			# _is_my_turn()) avoids ever sending a redraw the engine will
+			# reject just because the player already moved on to BUY_STOCK
+			# with a stale dead tile still sitting in their rack.
 			var col := VBoxContainer.new()
 			col.add_theme_constant_override("separation", 2)
 			var rt := RackTile.new()
 			col.add_child(rt)
 			rt.setup(tile, _theme, self, true)
-			if _is_my_turn():
+			if _is_my_turn() and state.phase == Phase.PLACE_TILE:
 				var redraw := Button.new()
 				redraw.text = "Redraw"
 				redraw.add_theme_font_size_override("font_size", 11)
