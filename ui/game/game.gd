@@ -22,7 +22,25 @@ var state: GameState
 var session: GameSession
 var _theme: ThemeDef
 
+# Theme toggle (bottom-of-screen footer button): purely cosmetic, swaps which
+# ThemeDef resource is loaded and rebuilds the UI from it. Never touches
+# GameState, so it's safe to use mid-game and even while networked.
+const THEME_PATHS := {
+	"default": "res://theme/default_theme.tres",
+	"fantasy": "res://theme/fantasy_theme.tres",
+}
+const THEME_DISPLAY_NAMES := {
+	"default": "Classic",
+	"fantasy": "Fantasy",
+}
+var _theme_key := "fantasy"
+var _theme_toggle_btn: Button
+
 # UI nodes built in _build_layout().
+var _ui_root: Control          # wraps everything _build_layout() creates, so a
+								# theme-toggle rebuild can free just this and
+								# leave any networking Node (EnetTransport)
+								# added directly under `self` untouched.
 var _board_grid: GridContainer
 var _cells := {}                 # Vector2i -> BoardCell
 var _header_lbl: Label
@@ -73,7 +91,7 @@ var _my_player_name := ""
 
 
 func _ready() -> void:
-	_theme = load("res://theme/default_theme.tres")
+	_theme = load(THEME_PATHS[_theme_key])
 	_build_layout()
 	if NetConfig.has_pending:
 		_my_player_name = NetConfig.player_name
@@ -117,9 +135,21 @@ func _notification(what: int) -> void:
 # ===========================================================================
 
 func _build_layout() -> void:
+	# Rebuilding (theme toggle): tear down the previous UI tree in one shot.
+	# free() (not queue_free()) so the old tree is gone before we add the new
+	# one this same frame — otherwise both would briefly coexist and overlap.
+	if _ui_root:
+		_ui_root.free()
+		_cells.clear()
+	_ui_root = Control.new()
+	_ui_root.name = "UiRoot"
+	_ui_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ui_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_ui_root)
+
 	var bg := ColorRect.new()
 	bg.color = _theme.color_background
-	add_child(bg)
+	_ui_root.add_child(bg)
 	bg.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 	# Guard against the window being resized so small that controls overlap
@@ -132,7 +162,7 @@ func _build_layout() -> void:
 	# container — so the test buttons stay visible no matter how much the
 	# board/sidebar content overflows and has to scroll.
 	var main_vbox := VBoxContainer.new()
-	add_child(main_vbox)
+	_ui_root.add_child(main_vbox)
 	main_vbox.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	main_vbox.offset_left = 14
 	main_vbox.offset_top = 10
@@ -229,13 +259,13 @@ func _build_layout() -> void:
 
 	# --- FX overlay (Stage 2): transient animated visuals (tile/stock slides,
 	# merge flashes) render here, above everything else since it's the last
-	# child of the root Control. Lives outside both ScrollContainers so a
-	# tween on its children's global_position isn't distorted by scrolling.
+	# child of _ui_root. Lives outside both ScrollContainers so a tween on its
+	# children's global_position isn't distorted by scrolling.
 	_fx_layer = Control.new()
 	_fx_layer.name = "FxLayer"
 	_fx_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_fx_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(_fx_layer)
+	_ui_root.add_child(_fx_layer)
 
 func _build_chains_table_box() -> PanelContainer:
 	var box := PanelContainer.new()
@@ -349,8 +379,71 @@ func _build_test_footer() -> VBoxContainer:
 	_dev_row.add_child(reset)
 	footer.add_child(_dev_row)
 
+	footer.add_child(_build_theme_row())
 	footer.add_child(_build_network_status_row())
 	return footer
+
+## Cosmetic-only theme switcher. Always visible (unlike the dev-tools row,
+## which hides once a remote peer has joined) since swapping ThemeDef never
+## touches GameState — every connected peer can flip their own local skin
+## independently without desyncing anyone.
+func _build_theme_row() -> HBoxContainer:
+	var row := HBoxContainer.new()
+	row.alignment = BoxContainer.ALIGNMENT_END
+	row.add_theme_constant_override("separation", 8)
+
+	var lbl := Label.new()
+	lbl.text = "Theme: %s" % THEME_DISPLAY_NAMES[_theme_key]
+	lbl.add_theme_color_override("font_color", _theme.color_lone_tile)
+	row.add_child(lbl)
+
+	_theme_toggle_btn = _bordered_button(_theme_toggle_label())
+	_theme_toggle_btn.pressed.connect(_on_theme_toggle_pressed)
+	row.add_child(_theme_toggle_btn)
+	_sync_theme_toggle_enabled()
+	return row
+
+func _theme_toggle_label() -> String:
+	var other_key := "default" if _theme_key == "fantasy" else "fantasy"
+	return "Switch to %s Theme" % THEME_DISPLAY_NAMES[other_key]
+
+## Disabled once networked: a rebuild would reset the network-status row's
+## live text (e.g. "Hosting on port X — N joined") back to its just-built
+## default, since that text is set ad hoc by the hosting/joining/lobby
+## handlers rather than recomputed from a single source of truth each
+## refresh. Re-synced from _refresh_all() so the button disables itself the
+## moment _is_networked flips true, without needing a rebuild of its own.
+func _sync_theme_toggle_enabled() -> void:
+	if not _theme_toggle_btn:
+		return
+	_theme_toggle_btn.disabled = _is_networked
+	_theme_toggle_btn.tooltip_text = "Disabled while playing a networked game." if _is_networked else ""
+
+## Swaps the active ThemeDef and rebuilds the UI from it. Ignored mid-
+## animation, since _build_layout() would free _fx_layer nodes a running
+## tween still holds references to. Safe to call with state == null (e.g. a
+## solo lobby before any game has started) — the rebuilt UI just stays in
+## its empty/frozen state; _refresh_all() only runs once there's a real
+## GameState to read from.
+##
+## The actual rebuild is deferred (_rebuild_themed_ui, via call_deferred)
+## rather than run inline here: this function runs INSIDE the toggle
+## button's own "pressed" signal emission, and _build_layout() frees the
+## entire _ui_root tree the button itself lives under — freeing a node
+## while it's still mid-emission of its own signal crashes the engine
+## (Godot's own error for this points at exactly this fix: defer it so the
+## free happens only after the signal has finished propagating).
+func _on_theme_toggle_pressed() -> void:
+	if _animating or _is_networked:
+		return
+	_theme_key = "default" if _theme_key == "fantasy" else "fantasy"
+	_theme = load(THEME_PATHS[_theme_key])
+	call_deferred("_rebuild_themed_ui")
+
+func _rebuild_themed_ui() -> void:
+	_build_layout()
+	if state:
+		_refresh_all()
 
 ## Host-only "Start Networked Game" button + a live status label. Address/
 ## port entry now happens in ui/menu/menu.gd, before this scene is even
@@ -740,6 +833,7 @@ func _find_buy_card_node(chain: int) -> Control:
 func _refresh_all() -> void:
 	if _dev_row:
 		_dev_row.visible = _dev_tools_visible()
+	_sync_theme_toggle_enabled()
 	if state == null:
 		return   # joined a networked lobby; waiting for the host's GAME_STARTED
 	_update_playable_hints()
