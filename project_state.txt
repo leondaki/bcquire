@@ -410,26 +410,19 @@ IN PROGRESS:
     check_near_endgame.gd 20/20, check_menu_flow.gd 18/18,
     check_animations.gd 10/10 — see section 4 for how to run all of them).
 
+COMPLETED MILESTONES:
+  1. Presentation polish, Stage 3 — retheme groundwork. ✅ COMPLETE.
+     Extended theme/theme_def.gd with new themeable fields (term_corporation,
+     term_stock, term_stockholder, term_money, term_merger, currency_symbol)
+     and created theme/fantasy_theme.gd with medieval fantasy chain names and
+     terminology. Routed ~25 hardcoded user-facing strings in ui/game/game.gd
+     through _theme.* fields instead of literals: "Your Stock" → "Your [term]",
+     "$%d" → "[currency]%d", "Merger" → "[term_merger]", etc. Commits: d2b8731.
+     Verification: all 6 headless suites pass; default theme produces identical
+     UI text as before (pure refactor); fantasy_theme.gd is now a drop-in
+     medieval re-skin ready for testing.
+
 NEXT MILESTONES (in order):
-  1. Presentation polish, Stage 3 — retheme groundwork. NOT STARTED.
-     Extend theme/theme_def.gd with a handful of new themeable fields
-     (game_title, currency_symbol, term_stock, a chain-collective noun, etc.)
-     mirroring the existing chain_names/chain_colors pattern, then route the
-     ~15-20 hardcoded user-facing strings in ui/game/game.gd identified
-     during planning (the "ACQUIRE" title, "STOCK PRICE CHART ($ per
-     share)", "Your Stock", the majority/minority bonus explanation, every
-     "$%d" currency format) through those new _theme.* fields instead of
-     literals. Setting-agnostic verbs ("Confirm", "Redraw", "End Turn",
-     "Buy") are explicitly OUT of scope — they don't need theming. This
-     stage intentionally does NOT author the actual medieval-fantasy
-     "gold for influence in kingdoms" skin the user described wanting
-     eventually — it only makes that skin a drop-in new .tres resource with
-     zero further code changes, which is what M5 below will then use.
-     Verification: with default_theme.tres unchanged, the game must look
-     textually identical to today (this is a refactor, not a content
-     change) — confirm via a manual pass through every screen, plus
-     re-running all six headless suites for safety (none of them currently
-     assert on these UI strings).
   2. M4 — Networked multiplayer. Staged per net/session.gd's host-
      authoritative design (full plan: a now-historical plan doc; this section
      is the live status).
