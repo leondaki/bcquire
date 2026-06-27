@@ -11,8 +11,12 @@ config_version=5
 [application]
 
 config/name="bcquire (Acquire Clone)"
-run/main_scene="res://ui/game/Game.tscn"
+run/main_scene="res://ui/menu/MainMenu.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
+
+[autoload]
+
+NetConfig="*res://net/net_config.gd"
 
 [display]
 

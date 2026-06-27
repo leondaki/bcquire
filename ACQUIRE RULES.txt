@@ -262,4 +262,3 @@ If a tile is placed in the wrong spot on the board and discovered on the turn it
 was placed, then it’s moved to the correct location. When an incorrect placement
 is discovered from a prior turn, that tile will remain in its current location. If the
 correct tile is held by a player, then exchange it for the incorrect tile.
-

@@ -35,6 +35,9 @@ var _msg_lbl: Label
 
 # Transient turn state.
 var _drag_coord := Vector2i(-1, -1)
+var _drag_tile_node: RackTile = null     # the rack tile currently lifted out of the hand
+var _drag_origin_pos := Vector2.ZERO     # its hand slot's global position, for the slide-back
+var _drag_drop_succeeded := false        # set by drop_tile() right before its own end_drag() call
 var _pending_coord := Vector2i(-1, -1)   # the tile being resolved (found/merge)
 var _merge_mode := ""                     # "" | "tie" | "dispose"
 var _merge_candidates: Array = []         # tied survivor choices
@@ -42,6 +45,17 @@ var _merge_survivor: int = Chain.NONE
 var _disposal_queue: Array = []           # [{ "defunct", "player" }]
 var _buy_counts := {}                     # chain -> shares queued this buy phase
 var _final_scores: Array = []
+
+# Animation layer (Stage 2). Events are queued and drained one at a time so
+# a burst of events from one action (e.g. a merger's PENDING/STARTED/
+# dispose/FINISHED sequence, all emitted synchronously in net/session.gd's
+# _process_action loop) never animates out of order or overlaps — see
+# _drain_event_queue()'s header comment.
+var _pending_events: Array = []
+var _draining_events := false
+var _animating := false             # true while an event's animation plays; blocks input
+var _animations_enabled := true     # headless scripts set this false for fast, sync tests
+var _fx_layer: Control              # transient animated visuals render here, above everything
 
 # Networking lobby (Stage B). _is_networked is false until Host/Join is
 # clicked; the dev-tooling row (Generate Mid-Game/Reset) is only visible while
@@ -51,17 +65,37 @@ var _is_networked := false
 var _lobby_peers: Array[int] = []         # remote peer ids, host-side, join order
 var _dev_row: HBoxContainer
 var _net_status_lbl: Label
-var _host_port_edit: LineEdit
-var _join_addr_edit: LineEdit
-var _join_port_edit: LineEdit
 var _start_net_btn: Button
+
+# Carried from ui/menu/menu.gd via the NetConfig autoload (see _ready()).
+# Used as this seat's display name instead of the "Player N" default.
+var _my_player_name := ""
 
 
 func _ready() -> void:
 	_theme = load("res://theme/default_theme.tres")
 	_build_layout()
-	_init_default_session()
-	_start_new_game()
+	if NetConfig.has_pending:
+		_my_player_name = NetConfig.player_name
+		var mode := NetConfig.mode
+		var host_port := NetConfig.host_port
+		var join_addr := NetConfig.join_address
+		var join_port := NetConfig.join_port
+		NetConfig.clear()
+		match mode:
+			"host":
+				_host_networked_game(host_port)
+			"join":
+				_join_networked_game(join_addr, join_port)
+			_:
+				_init_default_session()
+				_start_new_game()
+	else:
+		# Headless test scripts (sim/check_midgame.gd, sim/check_near_endgame.gd)
+		# instance Game.tscn directly without going through the menu, so
+		# NetConfig.has_pending is false here and this is their path too.
+		_init_default_session()
+		_start_new_game()
 
 ## Solo-play default: one host session over a one-peer loopback transport.
 ## Stage B's lobby will replace this with a real ENet transport and
@@ -193,6 +227,16 @@ func _build_layout() -> void:
 	# --- Footer (pinned, always visible — never inside a scroll container) ---
 	main_vbox.add_child(_build_test_footer())
 
+	# --- FX overlay (Stage 2): transient animated visuals (tile/stock slides,
+	# merge flashes) render here, above everything else since it's the last
+	# child of the root Control. Lives outside both ScrollContainers so a
+	# tween on its children's global_position isn't distorted by scrolling.
+	_fx_layer = Control.new()
+	_fx_layer.name = "FxLayer"
+	_fx_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fx_layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(_fx_layer)
+
 func _build_chains_table_box() -> PanelContainer:
 	var box := PanelContainer.new()
 	var sb := StyleBoxFlat.new()
@@ -297,46 +341,29 @@ func _build_test_footer() -> VBoxContainer:
 	var gen := _bordered_button("Generate Mid-Game")
 	gen.pressed.connect(_generate_midgame)
 	_dev_row.add_child(gen)
+	var gen2 := _bordered_button("Generate Near-Endgame")
+	gen2.pressed.connect(_generate_near_endgame)
+	_dev_row.add_child(gen2)
 	var reset := _bordered_button("Reset (Empty)")
 	reset.pressed.connect(_start_new_game)
 	_dev_row.add_child(reset)
 	footer.add_child(_dev_row)
 
-	footer.add_child(_build_lobby_row())
+	footer.add_child(_build_network_status_row())
 	return footer
 
-## Minimal host/join controls for real LAN play (Stage B). Hosting opens an
-## ENet server and waits for "Start Networked Game"; joining connects and
-## waits for the host's GAME_STARTED broadcast. See net/enet_transport.gd.
-func _build_lobby_row() -> HBoxContainer:
+## Host-only "Start Networked Game" button + a live status label. Address/
+## port entry now happens in ui/menu/menu.gd, before this scene is even
+## loaded — _ready() reads that choice from NetConfig and calls
+## _host_networked_game()/_join_networked_game() automatically, so this row
+## only needs to show what's happening, not collect input.
+func _build_network_status_row() -> HBoxContainer:
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
 
-	_host_port_edit = LineEdit.new()
-	_host_port_edit.text = "8910"
-	_host_port_edit.custom_minimum_size = Vector2(56, 0)
-	_host_port_edit.tooltip_text = "Port to host on"
-	row.add_child(_host_port_edit)
-	var host_btn := _bordered_button("Host")
-	host_btn.pressed.connect(_on_host_pressed)
-	row.add_child(host_btn)
-
-	_join_addr_edit = LineEdit.new()
-	_join_addr_edit.text = "127.0.0.1"
-	_join_addr_edit.custom_minimum_size = Vector2(110, 0)
-	_join_addr_edit.tooltip_text = "Host address"
-	row.add_child(_join_addr_edit)
-	_join_port_edit = LineEdit.new()
-	_join_port_edit.text = "8910"
-	_join_port_edit.custom_minimum_size = Vector2(56, 0)
-	_join_port_edit.tooltip_text = "Host port"
-	row.add_child(_join_port_edit)
-	var join_btn := _bordered_button("Join")
-	join_btn.pressed.connect(_on_join_pressed)
-	row.add_child(join_btn)
-
 	_start_net_btn = _bordered_button("Start Networked Game")
 	_start_net_btn.disabled = true
+	_start_net_btn.visible = false
 	_start_net_btn.pressed.connect(_on_start_networked_game_pressed)
 	row.add_child(_start_net_btn)
 
@@ -346,8 +373,9 @@ func _build_lobby_row() -> HBoxContainer:
 	row.add_child(_net_status_lbl)
 	return row
 
-func _on_host_pressed() -> void:
-	var port := int(_host_port_edit.text) if _host_port_edit.text.is_valid_int() else 8910
+## Host an ENet server on `port` and wait in the lobby for joiners; the host
+## clicks "Start Networked Game" once everyone expected has connected.
+func _host_networked_game(port: int) -> void:
 	var transport := EnetTransport.new()
 	# A fixed name is required: Godot's high-level RPC system routes by exact
 	# NodePath, and add_child() without one assigns an auto-generated name
@@ -370,14 +398,14 @@ func _on_host_pressed() -> void:
 	transport.peer_left.connect(_on_lobby_peer_left)
 	state = null   # frozen board until "Start Networked Game" deals a real GameState
 	_start_net_btn.disabled = false
+	_start_net_btn.visible = true
 	_net_status_lbl.text = "Hosting on port %d — 0 player(s) joined." % port
 	_refresh_all()
 
-func _on_join_pressed() -> void:
-	var addr := _join_addr_edit.text if not _join_addr_edit.text.is_empty() else "127.0.0.1"
-	var port := int(_join_port_edit.text) if _join_port_edit.text.is_valid_int() else 8910
+## Connect to a host at addr:port and wait for its GAME_STARTED broadcast.
+func _join_networked_game(addr: String, port: int) -> void:
 	var transport := EnetTransport.new()
-	transport.name = "EnetTransport"   # must match the host's NodePath exactly — see _on_host_pressed
+	transport.name = "EnetTransport"   # must match the host's NodePath exactly — see _host_networked_game
 	add_child(transport)
 	var err := transport.join(addr, port)
 	if err != OK:
@@ -410,7 +438,7 @@ func _on_lobby_peer_left(peer_id: int) -> void:
 ## Seat 0 is always the host; remote joiners get seats 1, 2, ... in the order
 ## they connected — see Event.make_game_started's peer_seats payload.
 func _on_start_networked_game_pressed() -> void:
-	var names := ["Host"]
+	var names := [_my_player_name if not _my_player_name.is_empty() else "Host"]
 	var peer_seats := {}
 	for i in _lobby_peers.size():
 		names.append("Player %d" % (i + 2))
@@ -440,6 +468,8 @@ func _start_new_game() -> void:
 	var names := []
 	for i in NUM_PLAYERS:
 		names.append("Player %d" % (i + 1))
+	if not _my_player_name.is_empty():
+		names[0] = _my_player_name
 	session.host_start_game(names)
 
 ## True if the local seat may act for whoever's turn it currently is (always
@@ -478,7 +508,42 @@ func _reset_turn_state() -> void:
 ## controller sends eventually round-trips back here (synchronously, in
 ## hotseat/loopback mode) via session.event_applied — see net/session.gd and
 ## net/event.gd for what each event type means and carries.
+##
+## Events are queued rather than handled inline: GameSession can emit several
+## events back-to-back for one action (e.g. a merger's PENDING/STARTED/
+## dispose/FINISHED sequence, all emitted synchronously in net/session.gd's
+## _process_action loop). If this handler awaited an animation directly, a
+## second event's emit() would re-enter it before the first one's await
+## resumed — Godot's emit() does not block on an awaiting signal handler — so
+## animations could overlap or run out of order. Queueing and draining one at
+## a time guarantees they never do, even when several events land in one frame.
 func _on_event_applied(event: Dictionary) -> void:
+	_pending_events.append(event)
+	if not _draining_events:
+		_drain_event_queue()
+
+func _drain_event_queue() -> void:
+	_draining_events = true
+	while not _pending_events.is_empty():
+		var event: Dictionary = _pending_events.pop_front()
+		await _apply_one_event(event)
+	_draining_events = false
+
+## Plays that event's animation (if any), with input locked for its duration,
+## then applies the same UI reaction the pre-animation code always has.
+func _apply_one_event(event: Dictionary) -> void:
+	_animating = true
+	_lock_action_box()
+	if _animations_enabled:
+		await _play_event_animation(event)
+	_animating = false
+	_apply_event_ui(event)
+
+## Per-event UI reaction: status messages + the state-derived UI rebuild.
+## Unchanged in substance from before the animation layer landed — this is
+## exactly the old _on_event_applied() body, just renamed and moved behind
+## the (optional) animation step above.
+func _apply_event_ui(event: Dictionary) -> void:
 	var p: Dictionary = event.payload
 	match event.type:
 		Event.GAME_STARTED:
@@ -536,6 +601,136 @@ func _on_event_applied(event: Dictionary) -> void:
 			_refresh_all()
 		Event.ACTION_REJECTED:
 			_msg(p.reason)
+
+# ===========================================================================
+#  Animation layer (Stage 2)
+# ===========================================================================
+
+## Disables every Button still showing in the action box while an animation
+## plays. The action box itself isn't rebuilt until _apply_event_ui()'s
+## _refresh_all() runs (after the animation finishes), so without this its
+## stale, pre-event buttons would stay clickable and could send an action for
+## a phase/turn that's already moved on.
+func _lock_action_box() -> void:
+	if _action_box:
+		for child in _action_box.get_children():
+			_disable_buttons_recursive(child)
+
+func _disable_buttons_recursive(node: Node) -> void:
+	if node is Button:
+		(node as Button).disabled = true
+	for child in node.get_children():
+		_disable_buttons_recursive(child)
+
+## Dispatches to a per-event-type animation. Events with no animation yet
+## just resolve immediately (no-op), which is also the bootstrap state this
+## whole layer shipped in before any concrete animation was added.
+func _play_event_animation(event: Dictionary) -> void:
+	match event.type:
+		Event.TILE_PLACED:
+			await _animate_tile_placed(event)
+		Event.STOCK_BOUGHT:
+			await _animate_stock_bought(event)
+		Event.MERGER_STARTED:
+			await _animate_merger_started(event)
+		_:
+			pass
+
+## Slides a duplicate-styled tile from its rack position to its board cell.
+## Runs before _refresh_all() tears the real rack tile down, so both the
+## source (still-current rack node) and destination (persistent BoardCell)
+## positions are exactly where the player saw them.
+func _animate_tile_placed(event: Dictionary) -> void:
+	var coord: Vector2i = event.payload.coord
+	var src := _find_rack_tile_node(coord)
+	var dst: BoardCell = _cells.get(coord)
+	if src == null or dst == null:
+		return
+	await _slide_visual(AcqEnums.tile_label(coord.x, coord.y), src.global_position, dst.global_position, src.size)
+
+## Slides a duplicate-styled card from the buy-stepper card the player just
+## used into the stock sidebar. The new StockCard doesn't exist yet (that's
+## built by _refresh_all() after this animation finishes), so the whole
+## stock box is used as the landing target rather than one specific card.
+func _animate_stock_bought(event: Dictionary) -> void:
+	var order: Dictionary = event.payload.order
+	if order.is_empty():
+		return
+	var chain: int = order.keys()[0]
+	var src := _find_buy_card_node(chain)
+	if src == null:
+		return
+	await _slide_visual(_theme.chain_name(chain), src.global_position, _stock_box.global_position, src.size)
+
+## Brief bright flash over every cell the merger's survivor chain now
+## occupies (queried post-mutation, since the host already applied the real
+## merge before broadcasting this event) — a simplification that flashes the
+## whole chain rather than tracking exactly which cells just changed hands,
+## but reads the same to a player watching the board.
+func _animate_merger_started(event: Dictionary) -> void:
+	var survivor: int = event.payload.survivor
+	var cellnodes: Array = []
+	for coord in _cells.keys():
+		if state.cell(coord.x, coord.y) == survivor:
+			cellnodes.append(_cells[coord])
+	if cellnodes.is_empty():
+		return
+	var tween := create_tween()
+	tween.set_parallel(true)
+	for cellnode in cellnodes:
+		cellnode.modulate = Color(1.6, 1.6, 1.0)
+		tween.tween_property(cellnode, "modulate", Color.WHITE, 0.35) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	await tween.finished
+
+## Spawns a transient label-on-panel on the FX layer and tweens it from
+## from_pos to to_pos (both global positions), freeing it when done.
+func _slide_visual(label_text: String, from_pos: Vector2, to_pos: Vector2, sz: Vector2, duration := 0.28) -> void:
+	var panel := Panel.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = _theme.color_placed
+	sb.set_corner_radius_all(4)
+	panel.add_theme_stylebox_override("panel", sb)
+	panel.size = sz
+	panel.global_position = from_pos
+	var lbl := Label.new()
+	lbl.text = label_text
+	lbl.size = sz
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	lbl.add_theme_color_override("font_color", Color.BLACK)
+	panel.add_child(lbl)
+	_fx_layer.add_child(panel)
+	var tween := create_tween()
+	tween.tween_property(panel, "global_position", to_pos, duration) \
+		.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	await tween.finished
+	panel.queue_free()
+
+## Finds the RackTile currently shown for `coord`, whether it's a live tile or
+## a dead one (wrapped in its own VBoxContainer alongside a Redraw button —
+## see _refresh_rack()).
+func _find_rack_tile_node(coord: Vector2i) -> RackTile:
+	for child in _rack_box.get_children():
+		if child is RackTile and (child as RackTile).coord == coord:
+			return child
+		if child is VBoxContainer:
+			for sub in child.get_children():
+				if sub is RackTile and (sub as RackTile).coord == coord:
+					return sub
+	return null
+
+## Finds the buy-stepper card for `chain` (see _build_buy_card()'s set_meta
+## tag), if the buy phase's action box is currently showing one.
+func _find_buy_card_node(chain: int) -> Control:
+	if not _action_box:
+		return null
+	for child in _action_box.get_children():
+		if child is HFlowContainer:
+			for card in child.get_children():
+				if card.has_meta("chain") and card.get_meta("chain") == chain:
+					return card
+	return null
 
 func _refresh_all() -> void:
 	if _dev_row:
@@ -724,26 +919,36 @@ func _mini_stock_indicator(chain: int, count: int) -> PanelContainer:
 # ===========================================================================
 
 func can_drag_tiles() -> bool:
-	return state != null and state.phase == Phase.PLACE_TILE and _is_my_turn()
+	return state != null and state.phase == Phase.PLACE_TILE and _is_my_turn() and not _animating
 
 func begin_drag(coord: Vector2i) -> void:
 	_drag_coord = coord
 	if _cells.has(coord):
 		_cells[coord].highlight = true
 		_cells[coord].refresh()
+	_lift_rack_tile(coord)
 
+## Called whenever a drag ends (success or not) — from drop_tile() right
+## before it sends the action, and unconditionally from _notification()'s
+## NOTIFICATION_DRAG_END (which fires for every drag regardless of outcome).
+## drop_tile() marks _drag_drop_succeeded first so this can tell the two
+## cases apart without depending on Viewport drag-state timing.
 func end_drag() -> void:
 	if _drag_coord.x >= 0 and _cells.has(_drag_coord):
 		_cells[_drag_coord].highlight = false
 		_cells[_drag_coord].refresh()
 	_drag_coord = Vector2i(-1, -1)
+	if not _drag_drop_succeeded and _drag_tile_node != null and is_instance_valid(_drag_tile_node):
+		_return_lifted_tile(_drag_tile_node)
+	_drag_tile_node = null
+	_drag_drop_succeeded = false
 
 ## A tile may only drop on the board cell matching its own coordinate, and only
 ## if that placement is currently legal.
 func can_drop_tile(col: int, row: int, data) -> bool:
 	if typeof(data) != TYPE_DICTIONARY or data.get("type") != "tile":
 		return false
-	if state == null or state.phase != Phase.PLACE_TILE:
+	if state == null or state.phase != Phase.PLACE_TILE or _animating:
 		return false
 	if data.get("coord") != Vector2i(col, row):
 		return false
@@ -751,8 +956,70 @@ func can_drop_tile(col: int, row: int, data) -> bool:
 	return kind != Kind.ILLEGAL_DEAD and kind != Kind.ILLEGAL_TEMP
 
 func drop_tile(col: int, row: int, _data) -> void:
+	_drag_drop_succeeded = true
 	end_drag()
 	session.send_action(Action.make_place_tile(state.current_player, Vector2i(col, row)))
+
+# --- "picked up by the mouse" hand affordance -------------------------------
+# Pure presentation, independent of _animations_enabled (which only gates
+# event-driven animations once an action's outcome is known): this is about
+# how the hand reacts to the drag gesture itself, success or not.
+
+## Hides the dragged tile (so the HFlowContainer reflows and the rest of the
+## hand visibly slides over to close the gap) and remembers its slot's
+## position for _return_lifted_tile() to slide back to on a failed drop.
+func _lift_rack_tile(coord: Vector2i) -> void:
+	var rt := _find_rack_tile_node(coord)
+	if rt == null:
+		return
+	_drag_tile_node = rt
+	_drag_origin_pos = rt.global_position
+	var before := _rack_top_positions()
+	rt.visible = false
+	await get_tree().process_frame
+	_tween_rack_to(before)
+
+## Slides a ghost tile from wherever the mouse released it back to the hand
+## slot it came from, then restores the real RackTile (sliding the rest of
+## the hand back open to make room for it).
+func _return_lifted_tile(rt: RackTile) -> void:
+	var release_pos := get_viewport().get_mouse_position()
+	await _slide_visual(rt.text, release_pos, _drag_origin_pos, rt.size)
+	if not is_instance_valid(rt):
+		return
+	var before := _rack_top_positions()
+	rt.visible = true
+	await get_tree().process_frame
+	_tween_rack_to(before)
+
+## Tweens the *direct* children of _rack_box (a bare RackTile for a live tile,
+## or its whole VBoxContainer for a dead tile + Redraw button) rather than
+## digging into the RackTile alone — a dead tile's Redraw button has to slide
+## along with it as one unit, or the wrapper's internal layout would visibly
+## tear during the tween.
+func _rack_top_positions() -> Dictionary:
+	var out := {}
+	for node in _rack_box.get_children():
+		out[node] = node.global_position
+	return out
+
+## FLIP-style reflow animation: each visible rack slot is snapped back to its
+## `before` position then tweened to wherever the container has now actually
+## placed it, so a tile being lifted out (or returned) reads as the rest of
+## the hand sliding over rather than an instant jump.
+func _tween_rack_to(before: Dictionary) -> void:
+	var tween := create_tween()
+	tween.set_parallel(true)
+	for node in _rack_box.get_children():
+		if not node.visible or not before.has(node):
+			continue
+		var old: Vector2 = before[node]
+		var target: Vector2 = node.global_position
+		if old.is_equal_approx(target):
+			continue
+		node.global_position = old
+		tween.tween_property(node, "global_position", target, 0.16) \
+			.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 
 # ===========================================================================
@@ -984,6 +1251,7 @@ func _build_buy_card(chain: int, total: int) -> PanelContainer:
 	var can_dec := count > 0
 
 	var card := PanelContainer.new()
+	card.set_meta("chain", chain)   # looked up by _find_buy_card_node() for the buy animation
 	var col := _theme.chain_color(chain)
 	var sb := StyleBoxFlat.new()
 	sb.bg_color = col.darkened(0.55)
@@ -1046,6 +1314,9 @@ func _build_gameover_actions() -> void:
 	var again := _bordered_button("New Game")
 	again.pressed.connect(_start_new_game)
 	_action_box.add_child(again)
+	var menu_btn := _bordered_button("Main Menu")
+	menu_btn.pressed.connect(func(): get_tree().change_scene_to_file("res://ui/menu/MainMenu.tscn"))
+	_action_box.add_child(menu_btn)
 
 
 # ===========================================================================
@@ -1122,6 +1393,73 @@ func _generate_midgame() -> void:
 	state.current_player = 0
 	state.phase = Phase.PLACE_TILE
 	_msg("Generated mid-game test state. Rack: grow/merge/tie + 1 dead + 1 temporarily-blocked tile.")
+	_refresh_all()
+
+## Build a hand-authored near-endgame so the "Declare Game End" flow can be
+## exercised without playing a full game by hand: two chains are already
+## SAFE (TOWER, AMERICAN) and a third (LUXOR) sits one tile short of safe.
+## Player 0's rack leads with the tile that grows LUXOR to safe size 11 —
+## placing it flips can_end_game() from false to true, so "Declare Game End"
+## appears on the very next buy-stock screen.
+func _generate_near_endgame() -> void:
+	state = GameState.new()
+	session.state = state   # dev harness pokes the session's mirror directly, bypassing Actions
+	state.setup_blank(NUM_PLAYERS)
+	_reset_turn_state()
+
+	_paint_chain(Chain.TOWER, _hcells(0, 11, 0))      # size 12, already safe
+	_paint_chain(Chain.AMERICAN, _hcells(0, 11, 2))   # size 12, already safe
+	_paint_chain(Chain.LUXOR, _hcells(0, 9, 4))       # size 10, one short of safe
+
+	# Distribute shares and cash across the three active chains only.
+	for p in state.players:
+		p.shares.fill(0)
+	_give(0, Chain.TOWER, 5); _give(0, Chain.AMERICAN, 3); _give(0, Chain.LUXOR, 4)
+	_give(1, Chain.TOWER, 4); _give(1, Chain.AMERICAN, 6); _give(1, Chain.LUXOR, 2)
+	_give(2, Chain.TOWER, 3); _give(2, Chain.AMERICAN, 2); _give(2, Chain.LUXOR, 1)
+	state.bank_shares = PackedInt32Array([13, 18, 14, 25, 25, 25, 25])  # 25 minus the above
+	state.players[0].cash = 3000
+	state.players[1].cash = 4500
+	state.players[2].cash = 5000
+
+	# Current player's rack: the first tile grows LUXOR to safe; the rest are
+	# unrelated isolated placements so the demo isn't a one-tile rack.
+	var demo: Array[Vector2i] = [
+		Vector2i(10, 4),  # grows LUXOR (10 -> 11): every active chain becomes safe
+		Vector2i(1, 6),
+		Vector2i(4, 6),
+		Vector2i(7, 6),
+		Vector2i(1, 8),
+		Vector2i(7, 8),
+	]
+	state.players[0].rack.clear()
+	for t in demo:
+		state.players[0].rack.append(t)
+
+	# Deal the other players from the remaining empty cells.
+	var taken := {}
+	for r in AcqEnums.BOARD_HEIGHT:
+		for c in AcqEnums.BOARD_WIDTH:
+			if state.cell(c, r) != AcqEnums.CELL_EMPTY:
+				taken[Vector2i(c, r)] = true
+	for t in demo:
+		taken[t] = true
+	var bag: Array[Vector2i] = []
+	for r in AcqEnums.BOARD_HEIGHT:
+		for c in AcqEnums.BOARD_WIDTH:
+			var v := Vector2i(c, r)
+			if not taken.has(v):
+				bag.append(v)
+	bag.shuffle()
+	state.bag = bag
+	for i in range(1, NUM_PLAYERS):
+		state.players[i].rack.clear()
+		for _j in AcqEnums.RACK_SIZE:
+			state.draw_tile(i)
+
+	state.current_player = 0
+	state.phase = Phase.PLACE_TILE
+	_msg("Generated near-endgame test state. Place the tile at 11E to grow Luxor to safe size 11 — every active chain will then be safe and \"Declare Game End\" will appear.")
 	_refresh_all()
 
 func _paint_chain(chain: int, cells: Array) -> void:

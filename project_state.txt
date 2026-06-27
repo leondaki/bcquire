@@ -23,7 +23,8 @@ Godot console exe (Windows, for headless/test runs):
   C:\Users\leond\AppData\Local\Microsoft\WinGet\Packages\
   GodotEngine.GodotEngine_Microsoft.Winget.Source_8wekyb3d8bbwe\
   Godot_v4.7-stable_win64_console.exe
-Project root: C:\Users\leond\OneDrive\Desktop\bcquire (NOT a git repo).
+Project root: C:\Users\leond\OneDrive\Desktop\bcquire (git repository,
+initialized mid-project — see section 4's PROJECT-LEVEL CONSTRAINTS).
 
 CORE DESIGN PATTERN: strict separation of rules engine / theme / UI / (future)
 networking. This is the single load-bearing decision in the codebase:
@@ -40,9 +41,18 @@ networking. This is the single load-bearing decision in the codebase:
                  extends Node, not NetworkTransport, since Godot's high-level
                  RPC system requires a Node; duck-typed to the same surface),
                  session.gd (GameSession — host-authoritative router between
-                 GameState and whichever transport is active). core/ still
-                 never imports net/ — the dependency runs net/ -> core/, one
-                 direction, same as ui/ -> core/.
+                 GameState and whichever transport is active), net_config.gd
+                 (NetConfig autoload — carries a menu choice across the
+                 MainMenu.tscn -> Game.tscn scene swap, see ui/menu/ below).
+                 core/ still never imports net/ — the dependency runs
+                 net/ -> core/, one direction, same as ui/ -> core/.
+  - ui/menu/     Pre-game menu (project.godot's run/main_scene as of the
+                 "presentation polish" plan's first stage, see section 3):
+                 MainMenu.tscn + menu.gd. Collects a player name and a mode
+                 (Hotseat/Host/Join), stashes it in the NetConfig autoload,
+                 then change_scene_to_file()'s to ui/game/Game.tscn, whose
+                 _ready() reads NetConfig and auto-starts the matching
+                 session.
   - theme/       ThemeDef resource (theme_def.gd) + default_theme.tres. ALL
                  cosmetic config: board size/tile size, palette, per-chain
                  display name + color (indexed by AcqEnums.ChainId). UI reads
@@ -64,7 +74,10 @@ networking. This is the single load-bearing decision in the codebase:
                  GameState convergence test over a loopback transport.
 
 FOLDER STRUCTURE (actual files on disk):
-  project.godot                  main_scene = res://ui/game/Game.tscn
+  project.godot                  main_scene = res://ui/menu/MainMenu.tscn
+                                  (was ui/game/Game.tscn before the main-menu
+                                  stage landed — see section 3). [autoload]
+                                  registers NetConfig = net/net_config.gd.
                                   stretch mode = disabled (1:1 pixel viewport,
                                   no canvas_items scaling), window resizable,
                                   min_size enforced at runtime (1000x620).
@@ -121,6 +134,49 @@ FOLDER STRUCTURE (actual files on disk):
                                   Must run with --process deferral (loads
                                   scene + calls _ready before asserting) —
                                   see file header comment for why.
+  sim/check_near_endgame.gd         Headless UI-integration check: instances
+                                  Game.tscn, calls _generate_near_endgame(),
+                                  and drives the real session/Action path
+                                  (grow the one unsafe chain to safe, then
+                                  declare the end) asserting can_end_game()
+                                  flips false->true, the "Declare Game End"
+                                  button appears/disappears correctly, and
+                                  the GAME_OVER summary screen renders sorted
+                                  final scores + a "New Game" button.
+                                  20 assertions, 0 failures.
+  sim/check_menu_flow.gd            Headless check for the main-menu/
+                                  NetConfig plumbing: MainMenu.tscn's
+                                  controls exist; a hotseat NetConfig intent
+                                  is consumed/cleared by Game.tscn's _ready()
+                                  and carries the chosen name to seat 0; a
+                                  host NetConfig intent auto-hosts and is
+                                  consumed/cleared; no pending intent falls
+                                  back to legacy default-hotseat behavior;
+                                  the game-over screen has both "New Game"
+                                  and "Main Menu" buttons. References the
+                                  NetConfig autoload via
+                                  get_root().get_node("NetConfig") rather
+                                  than the bare identifier, since a --script
+                                  entry point's own top-level script
+                                  compiles before autoloads are registered
+                                  as global identifiers (game.gd, loaded
+                                  later via load() at runtime, can reference
+                                  NetConfig directly with no such issue).
+                                  18 assertions, 0 failures.
+  sim/check_animations.gd           Headless check for the animation layer,
+                                  with animations left ON (the default — see
+                                  game.gd's _animations_enabled). A _step
+                                  state machine polled across real
+                                  _process() ticks (Tweens need real frames/
+                                  time): sends an animated TILE_PLACED action
+                                  and asserts _animating flips true and
+                                  drag/drop is locked out immediately, polls
+                                  until the tile-slide finishes and asserts
+                                  _animating clears with the model exactly
+                                  where the no-animation path already proves
+                                  correct, then repeats the same shape for a
+                                  MERGER_STARTED merge-flash animation.
+                                  10 assertions, 0 failures.
 
   theme/theme_def.gd                ThemeDef resource script: board_width/
                                   height, tile_size, full color palette incl.
@@ -145,7 +201,8 @@ FOLDER STRUCTURE (actual files on disk):
                                           phase label, rack, stock cards,
                                           action box (phase-dependent)
                                       footer (HBox, pinned OUTSIDE any
-                                        scroll — Generate Mid-Game / Reset
+                                        scroll — Generate Mid-Game /
+                                        Generate Near-Endgame / Reset
                                         buttons, always visible)
                                   Phase state machine drives _action_box
                                   contents: PLACE_TILE / FOUND_CHAIN /
@@ -158,6 +215,13 @@ FOLDER STRUCTURE (actual files on disk):
                                   merge, a normal merge, a grow, an isolated
                                   placement) — primary manual-test entry
                                   point, also driven by sim/check_midgame.gd.
+                                  _generate_near_endgame() builds a separate
+                                  scenario one grow away from can_end_game()
+                                  (2 safe chains + 1 chain one tile short of
+                                  safe) so the "Declare Game End" button and
+                                  GAME_OVER summary screen can be exercised
+                                  without playing a full game — also driven
+                                  by sim/check_near_endgame.gd.
   ui/game/board_cell.gd              BoardCell (Button): one board square.
                                   Pure view of GameState.cell(); colors from
                                   ThemeDef. `playable` flag drives the yellow
@@ -179,6 +243,21 @@ FOLDER STRUCTURE (actual files on disk):
                                   the buy-phase cards (built inline in
                                   game.gd's _build_buy_card(), not via the
                                   StockCard class itself).
+
+  ui/menu/MainMenu.tscn              Pre-game menu scene; project.godot's
+                                  run/main_scene. Bare Control + script, same
+                                  build-everything-in-code style as Game.tscn.
+  ui/menu/menu.gd                    Name field + Hotseat/Host/Join buttons +
+                                  host-port/join-address/join-port fields
+                                  (the same fields that used to live in
+                                  game.gd's footer). On submit, stashes the
+                                  choice into the NetConfig autoload (net/
+                                  net_config.gd) and calls
+                                  change_scene_to_file("res://ui/game/
+                                  Game.tscn"); that scene's _ready() reads
+                                  NetConfig.has_pending and auto-hosts/auto-
+                                  joins/starts hotseat accordingly, then
+                                  clears it.
 
   ui/board/*  (legacy, unused — see above)
 
@@ -219,17 +298,139 @@ FOLDER STRUCTURE (actual files on disk):
     window size enforced (1000x620); viewport stretch mode set to "disabled"
     (1:1 pixels, no scaling artifacts).
   - Test tooling: "Generate Mid-Game" button (+ matching headless check
-    sim/check_midgame.gd) and "Reset (Empty)" button, both in the always-
-    visible footer.
+    sim/check_midgame.gd), "Generate Near-Endgame" button (+ matching
+    headless check sim/check_near_endgame.gd, for exercising the "Declare
+    Game End" button and GAME_OVER summary screen), and "Reset (Empty)"
+    button, all in the always-visible footer.
+  - Main menu / NetConfig (first of the post-M4 "presentation polish" plan's
+    three stages — see below): ui/menu/MainMenu.tscn + ui/menu/menu.gd is now
+    project.godot's run/main_scene. It collects a player name and a mode
+    (Hotseat / Host / Join, the latter two reusing the address/port fields
+    that used to live in the game screen's footer) and stashes the choice in
+    a new autoload singleton, net/net_config.gd (registered as "NetConfig" in
+    project.godot's [autoload] — note: no class_name on that script, since
+    Godot 4 treats a class_name matching an autoload's own name as a
+    conflict, not an alias). ui/game/game.gd's _ready() reads
+    NetConfig.has_pending and auto-hosts/auto-joins/starts hotseat
+    accordingly, then clears it; if has_pending is false (e.g. headless
+    scripts that instance Game.tscn directly, or running Game.tscn standalone
+    during dev) it falls back to exactly the old default solo-hotseat
+    behavior — zero behavior change for every existing headless suite. The
+    game screen's footer now only shows a live status label + the host's
+    "Start Networked Game" button (address/port entry fields were removed,
+    since that's the menu's job now); the game-over screen gained a
+    "Main Menu" button next to "New Game", calling
+    get_tree().change_scene_to_file("res://ui/menu/MainMenu.tscn"). New
+    headless check: sim/check_menu_flow.gd (18 assertions) covers the
+    MainMenu controls existing, the hotseat/host paths correctly consuming
+    and clearing NetConfig, the no-pending-intent fallback matching legacy
+    behavior, and the game-over screen's two buttons.
+  - Animation layer (second of the three "presentation polish" stages):
+    ui/game/game.gd's GameSession.event_applied handler no longer reacts to
+    events inline. _on_event_applied() now only pushes onto _pending_events
+    and kicks _drain_event_queue() (a coroutine) if one isn't already
+    running; that coroutine pops one event at a time, awaits
+    _play_event_animation(event) (a no-op for any event type with no
+    animation yet), then runs the unchanged old reaction logic — renamed
+    _apply_event_ui() — before moving to the next queued event. This exists
+    because GameSession can emit several events for one action (e.g. a
+    merger's PENDING/STARTED/dispose/FINISHED burst, all emitted
+    synchronously in net/session.gd's _process_action loop); a coroutine
+    connected directly to the signal would let those animations overlap,
+    since Godot's emit() doesn't block on an awaiting listener — queueing
+    guarantees they never do. A new bool, _animating, is true for the
+    duration of each event's animation; can_drag_tiles()/can_drop_tile() and
+    every Button still showing in _action_box (via the new
+    _lock_action_box()/_disable_buttons_recursive() helpers — the action box
+    itself isn't rebuilt until the animation finishes) are locked while it's
+    true, so a player can't act on stale, pre-event controls mid-animation.
+    A new top_level Control, _fx_layer (built once in _build_layout(), last
+    child so it renders above everything), hosts transient animated visuals
+    spawned by _slide_visual() (a duplicate-styled label-on-panel tweened
+    between two global positions via create_tween()). Three concrete
+    animations ship now: _animate_tile_placed (TILE_PLACED: slides from the
+    RackTile still shown pre-refresh to its BoardCell), _animate_stock_bought
+    (STOCK_BOUGHT: slides from the buy-stepper card — tagged with
+    set_meta("chain", ...) in _build_buy_card() so _find_buy_card_node() can
+    locate it — into the stock sidebar), and _animate_merger_started
+    (MERGER_STARTED: a brief modulate flash over every BoardCell the
+    survivor chain now occupies — queried post-mutation since the host
+    already applied the real merge before broadcasting, so this
+    intentionally flashes the whole chain rather than tracking exactly which
+    cells just changed hands). A bool, _animations_enabled (default true),
+    gates _play_event_animation() entirely; every headless sim/check_*.gd
+    script that drives session.send_action() against a real Game.tscn
+    instance sets it false immediately after instantiating, keeping those
+    suites fully synchronous and exactly as fast as before this stage. New
+    headless check: sim/check_animations.gd (10 assertions, animations left
+    ON) — unlike the other check_*.gd scripts it's a small _step state
+    machine polled across several real _process() ticks (Tweens need real
+    frames/time to resolve), confirming _animating flips true the instant an
+    animated action is sent, drag/drop and action-box buttons are locked out
+    meanwhile, and the model ends up exactly where the no-animation path
+    already proves correct once each animation finishes.
+  - Hand "picked up by the mouse" drag affordance: game.gd's begin_drag()
+    (called from RackTile._get_drag_data(), i.e. the instant a drag starts)
+    now calls _lift_rack_tile(coord), which hides that RackTile entirely
+    (visible = false) so the HFlowContainer reflows, then plays a FLIP-style
+    tween (_tween_rack_to(), snap-to-old-position + tween-to-new-position)
+    on the hand's remaining direct children so they visibly slide over to
+    close the gap instead of popping. end_drag() (called both from the
+    success path in drop_tile(), and unconditionally from
+    NOTIFICATION_DRAG_END) now distinguishes success from a missed/cancelled
+    drop via a plain bool, _drag_drop_succeeded — set true only by
+    drop_tile() right before its own end_drag() call — rather than trusting
+    Viewport.gui_is_drag_successful()'s timing relative to that call. On a
+    failed drop, end_drag() calls _return_lifted_tile(), which slides a
+    ghost (reusing the existing _slide_visual() helper from the Stage-2
+    animation layer) from wherever the mouse released back to the tile's
+    remembered hand-slot position (_drag_origin_pos, captured in
+    _lift_rack_tile() before hiding it), then re-shows the real RackTile and
+    plays the same FLIP tween in reverse so the rest of the hand slides back
+    open to make room for it. This is pure drag-gesture presentation,
+    independent of _animations_enabled (which only gates the event-driven
+    animations once an action's outcome is already known) — it always runs,
+    even in headless check_*.gd scripts, but none of them exercise real
+    drag-and-drop (they call session.send_action() directly), so this didn't
+    require touching any existing suite. _tween_rack_to() operates on
+    _rack_box's direct children (a bare RackTile for a live tile, or the
+    whole VBoxContainer for a dead tile + its Redraw button) rather than
+    reaching into the RackTile alone, so a dead tile's Redraw button slides
+    as one unit with it instead of tearing away mid-tween.
 
 IN PROGRESS:
-  - M4 Stage A (Action/Event plumbing) just landed — see "M4 — Networked
-    multiplayer" below for what shipped and what's still open. All headless
-    suites green (run_tests.gd 77/77, check_midgame.gd 18/18,
-    run_network_tests.gd convergence test, see section 4 for how to run).
+  - "Presentation polish" plan (main menu -> animation layer -> retheme
+    groundwork, in that user-chosen order; M4 Stages A-B and the end-game
+    flow were already done before this plan started). Stage 1 (main menu /
+    NetConfig) and Stage 2 (animation layer) are DONE — see their full
+    writeups above under 100% COMPLETE. Stage 3 (retheme groundwork) is
+    NOT STARTED and is the next task on the table — see "NEXT MILESTONES"
+    below for its scope. All six headless suites green (run_tests.gd 77/77,
+    check_midgame.gd 18/18, run_network_tests.gd convergence test,
+    check_near_endgame.gd 20/20, check_menu_flow.gd 18/18,
+    check_animations.gd 10/10 — see section 4 for how to run all of them).
 
 NEXT MILESTONES (in order):
-  1. M4 — Networked multiplayer. Staged per net/session.gd's host-
+  1. Presentation polish, Stage 3 — retheme groundwork. NOT STARTED.
+     Extend theme/theme_def.gd with a handful of new themeable fields
+     (game_title, currency_symbol, term_stock, a chain-collective noun, etc.)
+     mirroring the existing chain_names/chain_colors pattern, then route the
+     ~15-20 hardcoded user-facing strings in ui/game/game.gd identified
+     during planning (the "ACQUIRE" title, "STOCK PRICE CHART ($ per
+     share)", "Your Stock", the majority/minority bonus explanation, every
+     "$%d" currency format) through those new _theme.* fields instead of
+     literals. Setting-agnostic verbs ("Confirm", "Redraw", "End Turn",
+     "Buy") are explicitly OUT of scope — they don't need theming. This
+     stage intentionally does NOT author the actual medieval-fantasy
+     "gold for influence in kingdoms" skin the user described wanting
+     eventually — it only makes that skin a drop-in new .tres resource with
+     zero further code changes, which is what M5 below will then use.
+     Verification: with default_theme.tres unchanged, the game must look
+     textually identical to today (this is a refactor, not a content
+     change) — confirm via a manual pass through every screen, plus
+     re-running all six headless suites for safety (none of them currently
+     assert on these UI strings).
+  2. M4 — Networked multiplayer. Staged per net/session.gd's host-
      authoritative design (full plan: a now-historical plan doc; this section
      is the live status).
        STAGE A — DONE: Action/Event plumbing + loopback transport + the
@@ -292,18 +493,23 @@ NEXT MILESTONES (in order):
              event. Each client's GameSession looks itself up in that map
              (_on_event_received_as_client) and sets local_player_index —
              no separate private "you are seat N" message needed.
-           - game.gd's footer gained a lobby row: host port field + Host
-             button, join address/port fields + Join button, a status label,
-             and a host-only "Start Networked Game" button. Host/Join replace
-             the default solo `session` with a real EnetTransport-backed one
-             (hotseat_mode = false) and null out `state` until the real
-             GameState arrives via GAME_STARTED (can_drag_tiles/
-             can_drop_tile/_refresh_all all guard against state == null —
-             the board just freezes rather than crashing while a peer waits
-             in the lobby). The dev-tooling row (Generate Mid-Game/Reset)
-             auto-hides once any remote peer has joined
-             (_dev_tools_visible()), since those buttons poke GameState
-             directly and would desync anyone else watching.
+           - game.gd's footer originally gained a lobby row with its own
+             host-port/join-address/join-port fields and Host/Join buttons.
+             That row's input fields were later removed (presentation-polish
+             Stage 1, see 100% COMPLETE above): hosting/joining now starts
+             from ui/menu/menu.gd before Game.tscn is even loaded, carried
+             via the NetConfig autoload; game.gd's footer today keeps only
+             the live status label and the host-only "Start Networked Game"
+             button. Either path replaces the default solo `session` with a
+             real EnetTransport-backed one (hotseat_mode = false) and nulls
+             out `state` until the real GameState arrives via GAME_STARTED
+             (can_drag_tiles/can_drop_tile/_refresh_all all guard against
+             state == null — the board just freezes rather than crashing
+             while a peer waits in the lobby). The dev-tooling row (Generate
+             Mid-Game/Generate Near-Endgame/Reset) auto-hides once any
+             remote peer has joined (_dev_tools_visible()), since those
+             buttons poke GameState directly and would desync anyone else
+             watching.
            - No new headless test for Stage B by design: real socket/RPC
              behavior can't be exercised without an actual transport, so
              verification here is the manual two-window LAN checklist
@@ -311,16 +517,89 @@ NEXT MILESTONES (in order):
              below keeps the live version).
        STAGE C — NOT STARTED: verify seat-gating (_is_my_turn/_is_my_seat)
          actually disables the right controls once Stage B's hotseat_mode is
-         false; sim/check_seat_gating.gd.
+         false; sim/check_seat_gating.gd. Concrete plan (no real networking
+         needed — this tests game.gd's UI-gating logic, not engine
+         convergence, which run_network_tests.gd already covers):
+           1. Instance Game.tscn twice (ctrl_a = seat 0, ctrl_b = seat 1),
+             deferring one process tick each per the usual check_*.gd gotcha
+             (section 4). Set _animations_enabled = false on both.
+           2. Build ONE shared hand-authored GameState scenario (reuse/adapt
+             _generate_midgame()'s style) and assign it to both controllers'
+             `state` field AND `session.state`, exactly like the existing
+             dev-harness pattern (`ctrl.state = state; ctrl.session.state =
+             state` — see _generate_midgame()/_generate_near_endgame()).
+           3. On both sessions set hotseat_mode = false; set
+             ctrl_a.session.local_player_index = 0 and
+             ctrl_b.session.local_player_index = 1.
+           4. With state.current_player = 0: assert ctrl_a.can_drag_tiles()
+             is true and ctrl_a._rebuild_action_area() builds real PLACE_TILE
+             controls (not a waiting label) in _action_box; assert
+             ctrl_b.can_drag_tiles() is false and ctrl_b's action box shows
+             the "Waiting for ...'s move" label instead.
+           5. Flip state.current_player = 1 and re-assert the opposite for
+             both controllers — confirms the gating isn't hardcoded to seat 0.
+           6. Repeat the same shape for FOUND_CHAIN and BUY_STOCK phases
+             (both gated by the same _is_my_turn() check at
+             _rebuild_action_area()'s top) by mutating state.phase directly
+             in the shared scenario.
+           7. Cover the one phase gated DIFFERENTLY — RESOLVE_MERGER's
+             dispose sub-mode is per-shareholder via _is_my_seat(), not
+             per-current-player (see _rebuild_action_area()'s comment): build
+             a _disposal_queue with player 1 owed a decision while
+             state.current_player is still 0, and assert ctrl_a (seat 0) gets
+             the waiting label even though it's "their turn" engine-wise,
+             while ctrl_b (seat 1) gets the real dispose controls.
+           8. While in there, double-check can_drop_tile() defensively — it
+             currently has no _is_my_turn() check of its own (relies on the
+             fact that a drag can only start if can_drag_tiles() already
+             passed, since BoardCell's _can_drop_data only fires mid an
+             active local drag). Safe today by construction, but add an
+             explicit assertion in the test pinning that invariant so a
+             future refactor that decouples drag-start from this check
+             doesn't silently regress it.
        STAGE D — NOT STARTED: ai/bot_player.gd, a simple rule-based bot that
          calls session.send_action() like any other seat, for solo seat-
          filling; sim/check_bot_game.gd.
        STAGE E — NOT STARTED: consolidate the new sim/ suites into the
          "always re-run" discipline (already done for run_network_tests.gd —
          see section 4 below).
-  2. M5 — Theming pass. Author a second ThemeDef (different name/art) to
-     prove the re-skin path requires zero core/ or ui/ logic changes.
-  3. M6 — Steam packaging. GodotSteam integration (steam_transport.gd behind
+     FUNCTIONAL-EXPERIENCE GAPS found while planning Stage C (none block
+       Stage C itself, but matter before real networked play feels finished
+       — listed here so they aren't lost; none are started):
+       - Joiner's chosen name (typed into ui/menu/menu.gd, stashed in
+         NetConfig) never reaches the host. _on_start_networked_game_pressed()
+         always labels remote seats "Player 2", "Player 3", ... — the name
+         a joining player typed is discarded. Needs a small payload (e.g. on
+         EnetTransport connect, or folded into the join handshake) carrying
+         the joiner's name to the host before host_start_game() builds
+         `names`.
+       - No mid-game disconnect recovery: _on_lobby_peer_left() only fires
+         pre-game (lobby phase); there's no handler for a peer dropping
+         DURING play. If it's that seat's turn when they drop, the game just
+         hangs forever (no skip-turn, no bot takeover, no reconnect path).
+         At minimum needs a visible "seat N disconnected" state; a real fix
+         probably wants Stage D's bot able to take over an orphaned seat.
+       - No client reconnect: if a client's connection drops and they relaunch
+         and rejoin, they have no way to resync to the in-progress GameState
+         (the host's GAME_STARTED broadcast only fires once, at the start).
+       - Host has no lobby validation — "Start Networked Game" is clickable
+         with zero peers joined (silently starts a 1-player game) and there's
+         no max-player enforcement against board/tile-supply limits.
+       - "Main Menu" button on the game-over screen doesn't visibly tear down
+         the EnetTransport child node (added with a fixed name "EnetTransport"
+         — see _host_networked_game()'s comment on why) before the scene
+         change; worth confirming hosting/joining a second game in the same
+         process session doesn't hit a duplicate-node or stale-RPC-binding
+         issue. Untested today since every session so far has been single-
+         game-then-quit.
+  3. M5 — Theming pass. Author a second ThemeDef (different name/art) to
+     prove the re-skin path requires zero core/ or ui/ logic changes. This is
+     the user's stated medieval-fantasy "pay gold for influence in kingdoms"
+     skin; do this AFTER presentation-polish Stage 3 (above) lands, since
+     that stage is exactly the prerequisite groundwork (routing the
+     remaining hardcoded strings through ThemeDef) this milestone needs to
+     be a pure-content change.
+  4. M6 — Steam packaging. GodotSteam integration (steam_transport.gd behind
      the same network_transport.gd interface), Steam App ID + steam_appid.txt
      for local testing, Windows + Linux export presets, Steam Deck input/
      resolution pass, steamcmd depot upload docs.
@@ -386,22 +665,30 @@ ENGINE GOTCHAS HIT AND FIXED (so they aren't rediscovered):
     single "&" if you want a literal ampersand in a Godot Button's text.
 
 PROJECT-LEVEL CONSTRAINTS:
-  - Not a git repository (Is a git repository: false at session start). No
-    version control is in place; "create a new commit" workflows do not
-    apply here unless/until the user initializes one.
+  - Git repository, initialized mid-project (first commit covers rules
+    engine, hotseat UI, and M4 Stages A-B). No remote configured as of this
+    writing.
   - Windows machine; PowerShell is the shell tool used for all Godot CLI
     invocations (Bash tool also available, both work, PowerShell used in
     practice throughout this project's history).
-  - Always re-run ALL THREE headless suites after any change to core/,
-    net/, or ui/game/game.gd before declaring work done:
+  - Always re-run ALL SIX headless suites after any change to core/,
+    net/, ui/game/game.gd, or ui/menu/menu.gd before declaring work done:
       godot --headless --path <proj> --import   (only needed if a new
         class_name was added/removed; harmless to always run)
       godot --headless --path <proj> --script sim/run_tests.gd
       godot --headless --path <proj> --script sim/check_midgame.gd
       godot --headless --path <proj> --script sim/run_network_tests.gd
+      godot --headless --path <proj> --script sim/check_near_endgame.gd
+      godot --headless --path <proj> --script sim/check_menu_flow.gd
+      godot --headless --path <proj> --script sim/check_animations.gd
     Current expected output: "==== 77 passed, 0 failed ====",
-    "==== 18 passed, 0 failed ====", and a convergence-test pass count with
-    0 failed, all exit code 0. (A handful of "ObjectDB leaked"/"resources
+    "==== 18 passed, 0 failed ====", a convergence-test pass count with
+    0 failed, "==== 20 passed, 0 failed ====", "==== 18 passed,
+    0 failed ====", and "==== 10 passed, 0 failed ====", all exit code 0.
+    sim/check_animations.gd takes noticeably longer than the others (well
+    under a second, but non-zero) since it's the one script that lets real
+    Tweens run across real frames/time instead of disabling animations — see
+    its file-header comment. (A handful of "ObjectDB leaked"/"resources
     still in use at exit" warnings on process exit are pre-existing noise
     from headless scripts loading scenes/resources without explicit
     cleanup — not a regression signal; only the failed-count and exit code

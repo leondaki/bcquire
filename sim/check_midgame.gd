@@ -21,6 +21,7 @@ func _process(_dt: float) -> bool:
 
 	var scene = load("res://ui/game/Game.tscn").instantiate()
 	get_root().add_child(scene)   # runs _ready -> builds full UI
+	scene._animations_enabled = false   # this script doesn't drive actions, but stay consistent
 	scene._generate_midgame()     # also runs a full _refresh_all over the UI
 	var st: GameState = scene.state
 
