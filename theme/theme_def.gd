@@ -37,6 +37,14 @@ class_name ThemeDef
 	Color(0.22, 0.64, 0.70),  # Continental- teal
 ])
 
+## --- Terminology (themeable game terms) ---
+@export var term_corporation: String = "Corporation"
+@export var term_stock: String = "Stock"
+@export var term_stockholder: String = "Stockholder"
+@export var term_money: String = "Money"
+@export var term_merger: String = "Merger"
+@export var currency_symbol: String = "$"
+
 func chain_name(chain: int) -> String:
 	if chain >= 0 and chain < chain_names.size():
 		return chain_names[chain]

@@ -215,7 +215,7 @@ func _build_layout() -> void:
 	_rack_box = HFlowContainer.new()
 	side.add_child(_rack_box)
 
-	side.add_child(_section_label("Your Stock"))
+	side.add_child(_section_label("Your %s" % _theme.term_stock))
 	_stock_box = HFlowContainer.new()
 	side.add_child(_stock_box)
 
@@ -277,7 +277,7 @@ func _build_price_chart_box() -> PanelContainer:
 	var v := VBoxContainer.new()
 	box.add_child(v)
 	var head := Label.new()
-	head.text = "STOCK PRICE CHART  ($ per share)"
+	head.text = "STOCK PRICE CHART  (%s per %s)" % [_theme.currency_symbol, _theme.term_stock.to_lower()]
 	head.add_theme_font_size_override("font_size", 13)
 	head.add_theme_color_override("font_color", _theme.color_placed)
 	v.add_child(head)
@@ -319,7 +319,7 @@ func _build_price_chart_box() -> PanelContainer:
 		grid.add_child(label)
 		for rep in rep_for_tier:
 			var pl := Label.new()
-			pl.text = "$%d" % StockMarket.price(rep, int(row[1]))
+			pl.text = "%s%d" % [_theme.currency_symbol, StockMarket.price(rep, int(row[1]))]
 			pl.add_theme_font_size_override("font_size", 11)
 			pl.add_theme_color_override("font_color", _theme.color_label)
 			grid.add_child(pl)
@@ -563,7 +563,7 @@ func _apply_event_ui(event: Dictionary) -> void:
 			_pending_coord = p.coord
 			_refresh_all()
 		Event.CHAIN_FOUNDED:
-			_msg("Founded %s! You receive 1 founder's share." % _theme.chain_name(p.chain))
+			_msg("Founded %s! You receive 1 founder's %s." % [_theme.chain_name(p.chain), _theme.term_stock.to_lower()])
 			_refresh_all()
 		Event.MERGER_PENDING:
 			_pending_coord = p.coord
@@ -767,7 +767,7 @@ func _update_playable_hints() -> void:
 
 func _refresh_header() -> void:
 	var p: GameState.PlayerState = state.players[_viewer_seat()]
-	_header_lbl.text = "%s   —   $%d" % [p.pname, p.cash]
+	_header_lbl.text = "%s   —   %s%d" % [p.pname, _theme.currency_symbol, p.cash]
 	_header_lbl.add_theme_color_override("font_color", _theme.color_label)
 	_phase_lbl.text = _phase_instruction()
 
@@ -776,13 +776,13 @@ func _phase_instruction() -> String:
 		Phase.PLACE_TILE:
 			return "Drag one of your tiles (yellow squares) onto its matching spot on the board."
 		Phase.FOUND_CHAIN:
-			return "You founded a new chain — pick which company it becomes."
+			return "You founded a new chain — pick which %s it becomes." % _theme.term_corporation.to_lower()
 		Phase.RESOLVE_MERGER:
 			if _merge_mode == "tie":
-				return "Merger tie! The two largest chains are equal — choose which one survives."
-			return "Merger! Each shareholder of the defunct chain decides what to do with their stock."
+				return "%s tie! The two largest chains are equal — choose which one survives." % _theme.term_merger
+			return "%s! Each %s of the defunct chain decides what to do with their %s." % [_theme.term_merger, _theme.term_stockholder.to_lower(), _theme.term_stock.to_lower()]
 		Phase.BUY_STOCK:
-			return "Optionally buy up to %d shares, then end your turn." % AcqEnums.MAX_BUY_PER_TURN
+			return "Optionally buy up to %d %s, then end your turn." % [AcqEnums.MAX_BUY_PER_TURN, _theme.term_stock.to_lower()]
 		Phase.GAME_OVER:
 			return "Game over — final standings below."
 	return ""
@@ -837,7 +837,7 @@ func _refresh_stock() -> void:
 			any = true
 	if not any:
 		var l := Label.new()
-		l.text = "(no shares yet)"
+		l.text = "(no %s yet)" % _theme.term_stock.to_lower()
 		l.add_theme_color_override("font_color", _theme.color_lone_tile)
 		_stock_box.add_child(l)
 
@@ -884,7 +884,7 @@ func _refresh_chains_table() -> void:
 
 		# Price.
 		var price_lbl := Label.new()
-		price_lbl.text = "$%d" % state.current_price(ch)
+		price_lbl.text = "%s%d" % [_theme.currency_symbol, state.current_price(ch)]
 		price_lbl.add_theme_font_size_override("font_size", 12)
 		price_lbl.add_theme_color_override("font_color", _theme.color_label)
 		_chains_grid.add_child(price_lbl)
@@ -1150,7 +1150,7 @@ func _build_place_actions() -> void:
 
 func _build_found_actions() -> void:
 	var l := Label.new()
-	l.text = "Choose a company to found:"
+	l.text = "Choose a %s to found:" % _theme.term_corporation.to_lower()
 	l.add_theme_color_override("font_color", _theme.color_label)
 	_action_box.add_child(l)
 	for ch in state.available_chains():
@@ -1180,8 +1180,8 @@ func _build_dispose_actions() -> void:
 	_action_box.add_child(title)
 
 	var detail := Label.new()
-	detail.text = "You hold %d shares @ $%d. Trade 2-for-1 into %s (bank %d)." % [
-		held, price, _theme.chain_name(survivor), state.bank_shares[survivor]]
+	detail.text = "You hold %d %s @ %s%d. Trade 2-for-1 into %s (bank %d)." % [
+		held, _theme.term_stock.to_lower(), _theme.currency_symbol, price, _theme.chain_name(survivor), state.bank_shares[survivor]]
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detail.add_theme_color_override("font_color", _theme.color_label)
 	_action_box.add_child(detail)
@@ -1204,7 +1204,7 @@ func _build_dispose_actions() -> void:
 	_action_box.add_child(keep)
 	var update_keep := func(_v = 0):
 		var k := held - int(sell.value) - int(trade.value)
-		keep.text = "Keep: %d   (sells @ $%d = $%d)" % [maxi(k, 0), price, int(sell.value) * price]
+		keep.text = "Keep: %d   (sells @ %s%d = %s%d)" % [maxi(k, 0), _theme.currency_symbol, price, _theme.currency_symbol, int(sell.value) * price]
 	sell.value_changed.connect(update_keep)
 	trade.value_changed.connect(update_keep)
 	update_keep.call()
@@ -1231,7 +1231,7 @@ func _build_buy_actions() -> void:
 			flow.add_child(_build_buy_card(ch, total))
 
 		var summary := Label.new()
-		summary.text = "Selected %d / %d shares — cost $%d" % [total, AcqEnums.MAX_BUY_PER_TURN, _buy_cost()]
+		summary.text = "Selected %d / %d %s — cost %s%d" % [total, AcqEnums.MAX_BUY_PER_TURN, _theme.term_stock.to_lower(), _theme.currency_symbol, _buy_cost()]
 		summary.add_theme_color_override("font_color", _theme.color_placed)
 		_action_box.add_child(summary)
 
@@ -1278,7 +1278,7 @@ func _build_buy_card(chain: int, total: int) -> PanelContainer:
 	v.add_child(name_lbl)
 
 	var price_lbl := Label.new()
-	price_lbl.text = "$%d  (bank %d)" % [price, state.bank_shares[chain]]
+	price_lbl.text = "%s%d  (bank %d)" % [_theme.currency_symbol, price, state.bank_shares[chain]]
 	price_lbl.add_theme_color_override("font_color", _theme.color_label)
 	price_lbl.add_theme_font_size_override("font_size", 11)
 	v.add_child(price_lbl)
@@ -1312,7 +1312,7 @@ func _build_gameover_actions() -> void:
 		var row: Dictionary = _final_scores[i]
 		var l := Label.new()
 		var crown := "  WINNER" if i == 0 else ""
-		l.text = "%d.  %s — $%d%s" % [i + 1, row.name, row.cash, crown]
+		l.text = "%d.  %s — %s%d%s" % [i + 1, row.name, _theme.currency_symbol, row.cash, crown]
 		l.add_theme_font_size_override("font_size", 18 if i == 0 else 15)
 		l.add_theme_color_override("font_color", _theme.color_placed if i == 0 else _theme.color_label)
 		_action_box.add_child(l)
