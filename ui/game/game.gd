@@ -77,10 +77,10 @@ func _ready() -> void:
 	_build_layout()
 	if NetConfig.has_pending:
 		_my_player_name = NetConfig.player_name
-		var mode := NetConfig.mode
-		var host_port := NetConfig.host_port
-		var join_addr := NetConfig.join_address
-		var join_port := NetConfig.join_port
+		var mode: String = NetConfig.mode
+		var host_port: int = NetConfig.host_port
+		var join_addr: String = NetConfig.join_address
+		var join_port: int = NetConfig.join_port
 		NetConfig.clear()
 		match mode:
 			"host":
