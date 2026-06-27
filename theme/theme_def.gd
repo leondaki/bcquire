@@ -31,9 +31,9 @@ class_name ThemeDef
 	Color(0.95, 0.78, 0.20),  # Tower      - gold
 	Color(0.85, 0.30, 0.25),  # Luxor      - red
 	Color(0.22, 0.48, 0.86),  # American   - blue
-	Color(0.52, 0.36, 0.66),  # Worldwide  - purple
+	Color(0.52, 0.36, 0.20),  # Worldwide  - brown
 	Color(0.30, 0.66, 0.42),  # Festival   - green
-	Color(0.92, 0.56, 0.20),  # Imperial   - orange
+	Color("ef70ffff"),  # Imperial   - hot pink
 	Color(0.22, 0.64, 0.70),  # Continental- teal
 ])
 

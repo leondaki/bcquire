@@ -675,35 +675,70 @@ NEXT MILESTONES (in order):
        STAGE E — NOT STARTED: consolidate the new sim/ suites into the
          "always re-run" discipline (already done for run_network_tests.gd —
          see section 4 below).
-     FUNCTIONAL-EXPERIENCE GAPS found while planning Stage C (none block
-       Stage C itself, but matter before real networked play feels finished
-       — listed here so they aren't lost; none are started):
-       - Joiner's chosen name (typed into ui/menu/menu.gd, stashed in
-         NetConfig) never reaches the host. _on_start_networked_game_pressed()
-         always labels remote seats "Player 2", "Player 3", ... — the name
-         a joining player typed is discarded. Needs a small payload (e.g. on
-         EnetTransport connect, or folded into the join handshake) carrying
-         the joiner's name to the host before host_start_game() builds
-         `names`.
-       - No mid-game disconnect recovery: _on_lobby_peer_left() only fires
-         pre-game (lobby phase); there's no handler for a peer dropping
-         DURING play. If it's that seat's turn when they drop, the game just
-         hangs forever (no skip-turn, no bot takeover, no reconnect path).
-         At minimum needs a visible "seat N disconnected" state; a real fix
-         probably wants Stage D's bot able to take over an orphaned seat.
-       - No client reconnect: if a client's connection drops and they relaunch
-         and rejoin, they have no way to resync to the in-progress GameState
-         (the host's GAME_STARTED broadcast only fires once, at the start).
-       - Host has no lobby validation — "Start Networked Game" is clickable
-         with zero peers joined (silently starts a 1-player game) and there's
-         no max-player enforcement against board/tile-supply limits.
-       - "Main Menu" button on the game-over screen doesn't visibly tear down
-         the EnetTransport child node (added with a fixed name "EnetTransport"
-         — see _host_networked_game()'s comment on why) before the scene
-         change; worth confirming hosting/joining a second game in the same
-         process session doesn't hit a duplicate-node or stale-RPC-binding
-         issue. Untested today since every session so far has been single-
-         game-then-quit.
+     FUNCTIONAL-EXPERIENCE GAPS found while planning Stage C — RESOLVED:
+       all five were closed together since the fixes compose (the name
+       handshake added for gap 1 doubles as gap 3's reconnect-identification
+       mechanism). Kept here for the implementation notes/known limitations;
+       see net/enet_transport.gd, net/event.gd, net/session.gd,
+       core/game_state.gd, and ui/game/game.gd for the actual code.
+       - Joiner's chosen name reaching the host: EnetTransport gained a
+         lobby-only "hello" RPC (peer_hello signal / send_hello() /
+         _rpc_hello) — the client sends it on join_succeeded; the host
+         records it in game.gd's _lobby_peer_names and uses it in
+         _on_start_networked_game_pressed() instead of "Player N".
+       - Mid-game disconnect: game.gd tracks _peer_to_seat (built when the
+         game starts) and _disconnected_seats. _on_lobby_peer_left() now
+         branches on whether state == null (lobby vs. mid-game); mid-game it
+         marks the seat disconnected and posts a persistent "seat N
+         disconnected" message. _is_my_turn()/_is_my_seat() let the HOST act
+         for any disconnected seat so the game doesn't hang — a manual proxy,
+         not Stage D's bot (still not started; that remains the real fix).
+       - Client reconnect: the same "hello" handshake doubles as identity
+         recognition — if state != null and the announced name matches a
+         currently-disconnected seat, the host remaps that peer id to the
+         seat and calls the new GameSession.send_state_sync(), which sends a
+         private GAME_STATE_SYNC event built from the new
+         GameState.to_snapshot()/apply_snapshot() pair (board, chain_size,
+         bank_shares, bag, current_player, phase, players' cash/shares/
+         rack/pname — round-trip covered by sim/run_network_tests.gd's
+         test_state_snapshot_round_trip()). Known limitation: identity is by
+         exact name match, so two players with the same typed name collide —
+         accepted for this scope.
+       - Lobby validation: "Start Networked Game" now starts disabled and
+         only enables once >= 1 peer has joined (MIN_NETWORK_PLAYERS = 2
+         total); a joiner that would push the lobby past MAX_NETWORK_PLAYERS
+         (6, standard Acquire's max) is immediately kicked via the new
+         EnetTransport.kick_peer().
+       - EnetTransport teardown: the real bug was that
+         `multiplayer.multiplayer_peer` and its signal connections live on
+         the SceneTree's shared MultiplayerAPI, not on the EnetTransport
+         node, so freeing the node alone never closed the ENet socket.
+         EnetTransport._exit_tree() now closes the socket and disconnects
+         every high-level signal it connected, firing on every teardown path
+         (Main Menu's scene change, queue_free, app quit) — no change needed
+         at the "Main Menu" button call site itself.
+       Verification: all 7 headless suites re-run clean at their existing
+       pass counts (run_network_tests.gd now 1827 passed, up from 18, since
+       it gained the snapshot round-trip assertions). The name-handshake/
+       disconnect/reconnect/kick wire protocol itself needed a live two-
+       process ENet connection to exercise end-to-end, same as Stage B; that
+       attempt was inconclusive in this sandbox (the host process confirmed
+       LISTENing on its UDP port via netstat, but the client process never
+       completed the handshake — looks like a sandbox/firewall networking
+       restriction rather than a code issue, since the only path that
+       changed is signal wiring identical in shape to Stage B's already-
+       verified peer_joined/peer_left). Recommend a real two-window LAN/
+       localhost check on a normal desktop session before calling this done.
+       FOLLOW-ON FIX (found via real manual testing): with the lobby
+       validation above in place, _dev_tools_visible() (game.gd) still showed
+       the Generate Mid-Game/Generate Near-Endgame/Reset row to a host with
+       zero peers — clicking one of those (instead of the correctly-disabled
+       "Start Networked Game") instantly deals a hand-authored multi-player
+       test scenario, which looks exactly like the game started by itself.
+       Fixed by changing _dev_tools_visible() to `return not _is_networked`:
+       these dev buttons now never show once a real network session
+       (host or join) has begun, since a lone host now has no legitimate
+       solo-testing use for them either.
   2. M6 — Steam packaging. GodotSteam integration (steam_transport.gd behind
      the same network_transport.gd interface), Steam App ID + steam_appid.txt
      for local testing, Windows + Linux export presets, Steam Deck input/

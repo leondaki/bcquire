@@ -29,6 +29,7 @@ var _disposal_queue: Array = []
 
 func _initialize() -> void:
 	test_full_game_convergence()
+	test_state_snapshot_round_trip()
 	print("==== %d passed, %d failed ====" % [passed, failed])
 	quit(1 if failed > 0 else 0)
 
@@ -168,3 +169,43 @@ func _assert_converged(host: GameSession, client: GameSession, label: String) ->
 		check(hp.cash == cp.cash, "%s: player %d cash mismatch (%d vs %d)" % [label, i, hp.cash, cp.cash])
 		check(hp.shares == cp.shares, "%s: player %d shares mismatch" % [label, i])
 		check(hp.rack == cp.rack, "%s: player %d rack mismatch" % [label, i])
+
+## GameState.to_snapshot()/apply_snapshot() round trip — the building block
+## net/session.gd's send_state_sync() uses to resync a reconnecting client
+## mid-game. Plays a few real actions first so the snapshot isn't just the
+## (trivially equal) freshly-dealt state.
+func test_state_snapshot_round_trip() -> void:
+	var hub := LoopbackHub.new()
+	var host := GameSession.new(LoopbackTransport.new(hub, true), true, 0)
+	host.host_start_game(["Alice", "Bob"], 99)
+	var pi: int = host.state.current_player
+	var rack: Array = host.state.players[pi].rack
+	var legal_tile := Vector2i(-1, -1)
+	for t in rack:
+		if host.state.classify_placement(t.x, t.y).kind == Kind.ISOLATED:
+			legal_tile = t
+			break
+	if legal_tile.x >= 0:
+		host.send_action(Action.make_place_tile(pi, legal_tile))
+		if host.state.phase == Phase.BUY_STOCK:
+			host.send_action(Action.make_buy_stock(pi, {}, false))
+
+	var snapshot := host.state.to_snapshot()
+	var restored := GameState.new()
+	restored.apply_snapshot(snapshot)
+
+	var hs := host.state
+	check(hs.board == restored.board, "snapshot round trip: board mismatch")
+	check(hs.chain_size == restored.chain_size, "snapshot round trip: chain_size mismatch")
+	check(hs.bank_shares == restored.bank_shares, "snapshot round trip: bank_shares mismatch")
+	check(hs.bag == restored.bag, "snapshot round trip: bag mismatch")
+	eq(hs.current_player, restored.current_player, "snapshot round trip: current_player mismatch")
+	eq(hs.phase, restored.phase, "snapshot round trip: phase mismatch")
+	eq(hs.players.size(), restored.players.size(), "snapshot round trip: player count mismatch")
+	for i in hs.players.size():
+		var hp: GameState.PlayerState = hs.players[i]
+		var rp: GameState.PlayerState = restored.players[i]
+		eq(hp.pname, rp.pname, "snapshot round trip: player %d name mismatch" % i)
+		eq(hp.cash, rp.cash, "snapshot round trip: player %d cash mismatch" % i)
+		check(hp.shares == rp.shares, "snapshot round trip: player %d shares mismatch" % i)
+		check(hp.rack == rp.rack, "snapshot round trip: player %d rack mismatch" % i)

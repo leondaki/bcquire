@@ -32,6 +32,13 @@ signal peer_left(peer_id: int)
 signal join_succeeded
 signal join_failed(reason: String)
 
+## A joining/reconnecting peer announcing its chosen display name to the
+## host — also not part of the core Action/Event contract. ui/game/game.gd
+## uses this both to label a fresh joiner's seat correctly (instead of
+## "Player N") and, if the name matches a seat currently marked disconnected,
+## to recognize a returning player and resync them.
+signal peer_hello(peer_id: int, name: String)
+
 var _is_host_flag: bool = false
 
 func host(port: int) -> Error:
@@ -73,6 +80,35 @@ func _on_connection_failed() -> void:
 func _on_server_disconnected() -> void:
 	peer_left.emit(1)  # the server is always peer id 1
 
+## Closing the socket and dropping the high-level signal connections must
+## happen here, not just at the call site that frees this node: the socket
+## and `multiplayer.peer_connected`/etc connections live on the SceneTree's
+## shared MultiplayerAPI, not on this Node, so freeing the node alone (e.g.
+## a scene change back to the main menu) leaves the ENet socket open and the
+## signal bindings pointing at a freed object. _exit_tree() fires on every
+## teardown path (queue_free, scene change, app quit), so this is the one
+## place that reliably closes things down before a second game can be
+## hosted/joined in the same process.
+func _exit_tree() -> void:
+	if multiplayer.multiplayer_peer == null:
+		return
+	if multiplayer.peer_connected.is_connected(_on_peer_connected):
+		multiplayer.peer_connected.disconnect(_on_peer_connected)
+	if multiplayer.peer_disconnected.is_connected(_on_peer_disconnected):
+		multiplayer.peer_disconnected.disconnect(_on_peer_disconnected)
+	if multiplayer.connected_to_server.is_connected(_on_connected_to_server):
+		multiplayer.connected_to_server.disconnect(_on_connected_to_server)
+	if multiplayer.connection_failed.is_connected(_on_connection_failed):
+		multiplayer.connection_failed.disconnect(_on_connection_failed)
+	if multiplayer.server_disconnected.is_connected(_on_server_disconnected):
+		multiplayer.server_disconnected.disconnect(_on_server_disconnected)
+	multiplayer.multiplayer_peer.close()
+	multiplayer.multiplayer_peer = null
+
+## Host-only: forcibly drop a peer, e.g. when the lobby is already full.
+func kick_peer(peer_id: int) -> void:
+	multiplayer.multiplayer_peer.disconnect_peer(peer_id)
+
 
 # ===========================================================================
 #  NetworkTransport contract
@@ -93,6 +129,11 @@ func is_host() -> bool:
 func local_peer_id() -> int:
 	return multiplayer.get_unique_id()
 
+## Lobby-only: announce this peer's chosen display name to the host. Always
+## sent to peer id 1, same convention as send_action.
+func send_hello(name: String) -> void:
+	_rpc_hello.rpc_id(1, name)
+
 
 # ===========================================================================
 #  RPC wire methods — the only place packets actually move
@@ -105,3 +146,7 @@ func _rpc_send_action(action: Dictionary) -> void:
 @rpc("authority", "call_remote", "reliable")
 func _rpc_deliver_event(event: Dictionary) -> void:
 	event_received.emit(event)
+
+@rpc("any_peer", "call_remote", "reliable")
+func _rpc_hello(name: String) -> void:
+	peer_hello.emit(multiplayer.get_remote_sender_id(), name)

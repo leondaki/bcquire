@@ -21,6 +21,7 @@ const TURN_ENDED := "turn_ended"
 const TILE_REDRAWN := "tile_redrawn"
 const GAME_OVER := "game_over"
 const ACTION_REJECTED := "action_rejected"        # sent only to the offending peer, never broadcast
+const GAME_STATE_SYNC := "game_state_sync"        # sent only to one reconnecting peer, never broadcast
 
 ## `peer_seats` maps transport peer id -> seat index (state.players index), so
 ## every client can look up its own seat from one broadcast event instead of
@@ -87,3 +88,9 @@ static func make_game_over(final_scores: Array) -> Dictionary:
 
 static func make_action_rejected(reason: String, original_action: Dictionary) -> Dictionary:
 	return {"type": ACTION_REJECTED, "payload": {"reason": reason, "original_action": original_action}}
+
+## Full GameState resync for one reconnecting peer (see net/session.gd's
+## send_state_sync). `peer_seats` reuses GAME_STARTED's pattern so the
+## reconnecting peer can look up its own seat from this one message.
+static func make_game_state_sync(snapshot: Dictionary, peer_seats: Dictionary) -> Dictionary:
+	return {"type": GAME_STATE_SYNC, "payload": {"snapshot": snapshot, "peer_seats": peer_seats}}

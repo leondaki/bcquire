@@ -78,6 +78,15 @@ func host_start_game(player_names: Array, game_seed: int = 0, peer_seats: Dictio
 	transport.broadcast_event(event)
 	event_applied.emit(event)
 
+## Host-only: resync one reconnecting peer to the in-progress GameState
+## (rather than waiting for a fresh GAME_STARTED, which only ever fires once).
+## Sent privately, not broadcast — every other peer's mirror is already
+## current. `peer_seats` reuses the GAME_STARTED convention so the
+## reconnecting peer learns its own (unchanged) seat from this one message.
+func send_state_sync(peer_id: int, peer_seats: Dictionary) -> void:
+	assert(is_host, "Only the host can resync a client.")
+	transport.send_event_to(peer_id, Event.make_game_state_sync(state.to_snapshot(), peer_seats))
+
 
 # ===========================================================================
 #  Sending actions (every seat calls this uniformly)
@@ -113,7 +122,7 @@ func _process_action(action: Dictionary, from_peer_id: int) -> void:
 func _on_event_received_as_client(event: Dictionary) -> void:
 	if event.type != Event.ACTION_REJECTED:
 		_apply_event_to_state(event)
-		if event.type == Event.GAME_STARTED:
+		if event.type == Event.GAME_STARTED or event.type == Event.GAME_STATE_SYNC:
 			var peer_seats: Dictionary = event.payload.get("peer_seats", {})
 			if peer_seats.has(transport.local_peer_id()):
 				local_player_index = peer_seats[transport.local_peer_id()]
@@ -127,6 +136,9 @@ func _apply_event_to_state(event: Dictionary) -> void:
 		Event.GAME_STARTED:
 			state = GameState.new()
 			state.setup_new_game(p.player_names, p.seed)
+		Event.GAME_STATE_SYNC:
+			state = GameState.new()
+			state.apply_snapshot(p.snapshot)
 		Event.TILE_PLACED:
 			state.remove_from_rack(p.player, p.coord)
 			if p.kind == Kind.ISOLATED:

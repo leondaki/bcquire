@@ -5,4 +5,4 @@
 [resource]
 script = ExtResource("1")
 chain_names = PackedStringArray("Tower", "Luxor", "American", "Worldwide", "Festival", "Imperial", "Continental")
-chain_colors = PackedColorArray(0.95, 0.78, 0.2, 1, 0.85, 0.3, 0.25, 1, 0.22, 0.48, 0.86, 1, 0.52, 0.36, 0.66, 1, 0.3, 0.66, 0.42, 1, 0.92, 0.56, 0.2, 1, 0.22, 0.64, 0.7, 1)
+chain_colors = PackedColorArray(0.95, 0.78, 0.2, 1, 0.85, 0.3, 0.25, 1, 0.22, 0.48, 0.86, 1, 0.52156866, 0.36078432, 0.2, 1, 0.3, 0.66, 0.42, 1, 0.9372549, 0.4392157, 1, 1, 0.22, 0.64, 0.7, 1)

@@ -89,9 +89,19 @@ var _fx_layer: Control              # transient animated visuals render here, ab
 # state without going through an Action and would desync any connected peer.
 var _is_networked := false
 var _lobby_peers: Array[int] = []         # remote peer ids, host-side, join order
+var _lobby_peer_names: Dictionary = {}    # host-side: peer id -> name announced via send_hello
 var _dev_row: HBoxContainer
 var _net_status_lbl: Label
 var _start_net_btn: Button
+
+# Host-only bookkeeping for mid-game disconnect/reconnect (see
+# _on_lobby_peer_left/_on_peer_hello). Standard Acquire needs 2-6 players, so
+# that's also the cap enforced when joiners connect to the lobby.
+const MIN_NETWORK_PLAYERS := 2
+const MAX_NETWORK_PLAYERS := 6
+var _peer_to_seat: Dictionary = {}        # host-side: peer id -> seat index, set once the game starts
+var _disconnected_seats: Dictionary = {}  # host-side: seat index -> true while that seat's peer is gone
+var _net_transport: EnetTransport         # set by _host_networked_game/_join_networked_game
 
 # Carried from ui/menu/menu.gd via the NetConfig autoload (see _ready()).
 # Used as this seat's display name instead of the "Player N" default.
@@ -504,13 +514,18 @@ func _host_networked_game(port: int) -> void:
 
 	_is_networked = true
 	_lobby_peers = []
+	_lobby_peer_names = {}
+	_peer_to_seat = {}
+	_disconnected_seats = {}
+	_net_transport = transport
 	session = GameSession.new(transport, true, 0)
 	session.hotseat_mode = false
 	session.event_applied.connect(_on_event_applied)
 	transport.peer_joined.connect(_on_lobby_peer_joined)
 	transport.peer_left.connect(_on_lobby_peer_left)
+	transport.peer_hello.connect(_on_peer_hello)
 	state = null   # frozen board until "Start Networked Game" deals a real GameState
-	_start_net_btn.disabled = false
+	_start_net_btn.disabled = true   # re-enabled once MIN_NETWORK_PLAYERS have joined
 	_start_net_btn.visible = true
 	_net_status_lbl.text = "Hosting on port %d — 0 player(s) joined." % port
 	_refresh_all()
@@ -527,10 +542,16 @@ func _join_networked_game(addr: String, port: int) -> void:
 		return
 
 	_is_networked = true
+	_net_transport = transport
 	session = GameSession.new(transport, false, -1)   # seat unknown until GAME_STARTED arrives
 	session.hotseat_mode = false
 	session.event_applied.connect(_on_event_applied)
-	transport.join_succeeded.connect(func(): _net_status_lbl.text = "Connected — waiting for host to start.")
+	transport.join_succeeded.connect(func():
+		_net_status_lbl.text = "Connected — waiting for host to start."
+		# Announces this seat's chosen name to the host so it isn't labeled
+		# "Player N" — also doubles as a reconnect handshake if this client
+		# previously dropped mid-game (see game.gd's _on_peer_hello, host-side).
+		transport.send_hello(_my_player_name if not _my_player_name.is_empty() else "Player"))
 	transport.join_failed.connect(func(reason): _net_status_lbl.text = "Join failed: %s" % reason)
 	transport.peer_left.connect(func(_id): _msg("Disconnected from host."))
 	state = null   # frozen board until the host's GAME_STARTED deals a real GameState
@@ -538,14 +559,51 @@ func _join_networked_game(addr: String, port: int) -> void:
 	_refresh_all()
 
 func _on_lobby_peer_joined(peer_id: int) -> void:
+	if state != null:
+		# Game already in progress: an ENet-level (re)connection with no seat
+		# yet. Seat recognition happens once their _on_peer_hello name arrives
+		# (see below) — a fresh joiner mid-game with no matching disconnected
+		# seat is left waiting, since there's no open seat to give them.
+		return
+	if 1 + _lobby_peers.size() >= MAX_NETWORK_PLAYERS:
+		_net_transport.kick_peer(peer_id)
+		return
 	if not _lobby_peers.has(peer_id):
 		_lobby_peers.append(peer_id)
 	_net_status_lbl.text = "Hosting — %d player(s) joined." % _lobby_peers.size()
+	_start_net_btn.disabled = _lobby_peers.size() < MIN_NETWORK_PLAYERS - 1
 
 func _on_lobby_peer_left(peer_id: int) -> void:
-	_lobby_peers.erase(peer_id)
-	_msg("A player disconnected.")
-	_net_status_lbl.text = "Hosting — %d player(s) joined." % _lobby_peers.size()
+	if state == null:
+		_lobby_peers.erase(peer_id)
+		_msg("A player disconnected.")
+		_net_status_lbl.text = "Hosting — %d player(s) joined." % _lobby_peers.size()
+		_start_net_btn.disabled = _lobby_peers.size() < MIN_NETWORK_PLAYERS - 1
+		return
+	# Mid-game: leave the seat assignment in place (so a reconnect can find
+	# it) and just flag it as disconnected. _is_my_turn()/_is_my_seat() let
+	# the host act for a disconnected seat so the game doesn't hang.
+	if _peer_to_seat.has(peer_id):
+		var seat: int = _peer_to_seat[peer_id]
+		_disconnected_seats[seat] = true
+		_msg("%s (seat %d) disconnected." % [state.players[seat].pname, seat + 1])
+
+## Host-only: a peer announcing its chosen name (see EnetTransport.send_hello).
+## Before the game starts this just labels a fresh joiner correctly; once the
+## game is running, a name matching a currently-disconnected seat means that
+## player reconnected under a new ENet peer id — remap and resync them.
+func _on_peer_hello(peer_id: int, name: String) -> void:
+	if state == null:
+		_lobby_peer_names[peer_id] = name
+		return
+	for seat in _disconnected_seats.keys():
+		if state.players[seat].pname == name:
+			_disconnected_seats.erase(seat)
+			_peer_to_seat[peer_id] = seat
+			var peer_seats := {peer_id: seat}
+			session.send_state_sync(peer_id, peer_seats)
+			_msg("%s (seat %d) reconnected." % [name, seat + 1])
+			return
 
 ## Host-only: deal the real game once every expected player has joined.
 ## Seat 0 is always the host; remote joiners get seats 1, 2, ... in the order
@@ -554,16 +612,23 @@ func _on_start_networked_game_pressed() -> void:
 	var names := [_my_player_name if not _my_player_name.is_empty() else "Host"]
 	var peer_seats := {}
 	for i in _lobby_peers.size():
-		names.append("Player %d" % (i + 2))
-		peer_seats[_lobby_peers[i]] = i + 1
+		var peer_id: int = _lobby_peers[i]
+		names.append(_lobby_peer_names.get(peer_id, "Player %d" % (i + 2)))
+		peer_seats[peer_id] = i + 1
+		_peer_to_seat[peer_id] = i + 1
 	_start_net_btn.disabled = true
 	_net_status_lbl.text = "Game started (%d player%s)." % [names.size(), "" if names.size() == 1 else "s"]
 	session.host_start_game(names, 0, peer_seats)
 
 ## Dev tooling (Generate Mid-Game/Reset) pokes GameState directly, bypassing
 ## Actions entirely — safe only while nobody else's UI is mirroring this state.
+## Previously also shown to a host with zero peers (on the theory there's no
+## one else's UI to desync yet), but "Start Networked Game" now requires a
+## real peer to even unlock, so a host waiting alone has no legitimate use
+## for these buttons — leaving them visible was just an easy way to mistake
+## a synthetic test scenario for "the game started by itself."
 func _dev_tools_visible() -> bool:
-	return not _is_networked or (session.is_host and _lobby_peers.is_empty())
+	return not _is_networked
 
 func _section_label(text: String) -> Label:
 	var l := Label.new()
@@ -586,12 +651,16 @@ func _start_new_game() -> void:
 	session.host_start_game(names)
 
 ## True if the local seat may act for whoever's turn it currently is (always
-## true in hotseat_mode; otherwise only the matching seat).
+## true in hotseat_mode; otherwise only the matching seat — except the host
+## may also act for a seat whose peer has disconnected mid-game, so the game
+## doesn't hang forever waiting on a dropped player; see _on_lobby_peer_left).
 func _is_my_turn() -> bool:
-	return session.hotseat_mode or state.current_player == session.local_player_index
+	return session.hotseat_mode or state.current_player == session.local_player_index \
+		or (session.is_host and _disconnected_seats.has(state.current_player))
 
 func _is_my_seat(player: int) -> bool:
-	return session.hotseat_mode or player == session.local_player_index
+	return session.hotseat_mode or player == session.local_player_index \
+		or (session.is_host and _disconnected_seats.has(player))
 
 ## Whose hand/cash/stock this window's sidebar shows. In hotseat_mode that's
 ## whoever's turn it is (one local window cycling through every seat, by
@@ -663,6 +732,11 @@ func _apply_event_ui(event: Dictionary) -> void:
 			state = session.state
 			_reset_turn_state()
 			_msg(_starting_draw_summary())
+			_refresh_all()
+		Event.GAME_STATE_SYNC:
+			state = session.state
+			_reset_turn_state()
+			_msg("Reconnected — synced to the in-progress game.")
 			_refresh_all()
 		Event.TILE_PLACED:
 			SfxManager.play_tile()

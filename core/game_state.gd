@@ -109,6 +109,46 @@ func setup_blank(num_players: int) -> void:
 	current_player = 0
 	phase = AcqEnums.GamePhase.PLACE_TILE
 
+# ===========================================================================
+#  Snapshot — full-state resync for a reconnecting network peer (M4 gap fix)
+# ===========================================================================
+
+## Everything needed to rebuild an equivalent GameState elsewhere, covering
+## exactly the fields sim/run_network_tests.gd's _assert_converged() already
+## treats as the convergence contract. `starting_draws`/`rng` are cosmetic
+## history, not gameplay-affecting, so they're intentionally omitted.
+func to_snapshot() -> Dictionary:
+	var player_snaps := []
+	for p in players:
+		player_snaps.append({"pname": p.pname, "cash": p.cash, "shares": p.shares, "rack": p.rack.duplicate()})
+	return {
+		"board": board,
+		"chain_size": chain_size.duplicate(),
+		"bank_shares": bank_shares,
+		"bag": bag.duplicate(),
+		"current_player": current_player,
+		"phase": phase,
+		"players": player_snaps,
+	}
+
+## Rebuilds this GameState from a Dictionary produced by to_snapshot() on
+## another instance — used to resync a reconnecting client mid-game.
+func apply_snapshot(snapshot: Dictionary) -> void:
+	board = snapshot.board.duplicate()
+	chain_size = snapshot.chain_size.duplicate()
+	bank_shares = snapshot.bank_shares.duplicate()
+	bag = snapshot.bag.duplicate()
+	current_player = snapshot.current_player
+	phase = snapshot.phase
+	players = []
+	for ps in snapshot.players:
+		var p := PlayerState.new(ps.pname)
+		p.cash = ps.cash
+		p.shares = ps.shares.duplicate()
+		p.rack = ps.rack.duplicate()
+		players.append(p)
+
+
 func _init_empty_board() -> void:
 	board = PackedInt32Array()
 	board.resize(W * H)
