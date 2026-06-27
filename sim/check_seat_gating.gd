@@ -208,11 +208,11 @@ func _has_waiting_label(ctrl) -> bool:
 			return true
 	return false
 
+## Dispose's SpinBoxes now live inside the Trade/Sell tab panels
+## (_action_box -> tabs HBoxContainer -> panel -> VBoxContainer -> SpinBox),
+## not as direct children of _action_box, so this must search recursively.
 func _has_dispose_controls(ctrl) -> bool:
-	for child in ctrl._action_box.get_children():
-		if child is SpinBox:
-			return true
-	return false
+	return not ctrl._action_box.find_children("*", "SpinBox", true, false).is_empty()
 
 func eq(got, expected, msg: String) -> void:
 	if got == expected:

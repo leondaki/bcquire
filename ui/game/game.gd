@@ -1273,32 +1273,74 @@ func _build_dispose_actions() -> void:
 	title.add_theme_font_size_override("font_size", 16)
 	_action_box.add_child(title)
 
+	# Reuse StockCard purely as an illustrative chain icon (count fixed to
+	# 2/1, not the player's real holding) to diagram the 2-for-1 trade:
+	# defunct stock on the left, an arrow, the surviving stock on the right.
+	var diagram := HBoxContainer.new()
+	diagram.alignment = BoxContainer.ALIGNMENT_CENTER
+	diagram.add_theme_constant_override("separation", 10)
+	_action_box.add_child(diagram)
+	var from_card := StockCard.new()
+	diagram.add_child(from_card)
+	from_card.setup(defunct, 2, price, _theme)
+	var arrow := Label.new()
+	arrow.text = "→"
+	arrow.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	arrow.add_theme_font_size_override("font_size", 28)
+	arrow.add_theme_color_override("font_color", _theme.color_label)
+	diagram.add_child(arrow)
+	var to_card := StockCard.new()
+	diagram.add_child(to_card)
+	to_card.setup(survivor, 1, state.current_price(survivor), _theme)
+
 	var detail := Label.new()
-	detail.text = "You hold %d %s @ %s%d. Trade 2-for-1 into %s (bank %d)." % [
-		held, _theme.term_stock.to_lower(), _theme.currency_symbol, price, _theme.chain_name(survivor), state.bank_shares[survivor]]
+	detail.text = "You hold %d %s @ %s%d. Bank has %d %s left." % [
+		held, _theme.term_stock.to_lower(), _theme.currency_symbol, price,
+		state.bank_shares[survivor], _theme.chain_name(survivor)]
 	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	detail.add_theme_color_override("font_color", _theme.color_label)
 	_action_box.add_child(detail)
 
+	# Three separate, clearly-labeled "tabs" — one per disposal option. All
+	# three stay live simultaneously (Acquire's real rules let a player
+	# split one holding across sell/trade/keep at once, e.g. trade 4, sell
+	# 2, keep 2 of an 8-share holding); clicking a tab's header only
+	# highlights it, as a focus aid for which action the player is
+	# currently looking at — it doesn't hide or disable the other two.
 	var sell := SpinBox.new()
 	sell.min_value = 0
 	sell.max_value = held
-	sell.prefix = "Sell "
-	_action_box.add_child(sell)
-
 	var trade := SpinBox.new()
 	trade.min_value = 0
 	trade.step = 2                                   # 2-for-1 needs an even count
 	trade.max_value = mini(held - (held % 2), state.bank_shares[survivor] * 2)
-	trade.prefix = "Trade "
-	_action_box.add_child(trade)
+	var keep_lbl := Label.new()
+	keep_lbl.add_theme_font_size_override("font_size", 20)
+	keep_lbl.add_theme_color_override("font_color", _theme.color_label)
 
-	var keep := Label.new()
-	keep.add_theme_color_override("font_color", _theme.color_label)
-	_action_box.add_child(keep)
+	var trade_tab := _build_dispose_tab("Trade", trade, "2-for-1 into %s" % _theme.chain_name(survivor))
+	var sell_tab := _build_dispose_tab("Sell", sell, "@ %s%d each" % [_theme.currency_symbol, price])
+	var keep_tab := _build_dispose_tab("Keep", null, "", keep_lbl)
+
+	var tabs := HBoxContainer.new()
+	tabs.add_theme_constant_override("separation", 8)
+	tabs.add_child(trade_tab.panel)
+	tabs.add_child(sell_tab.panel)
+	tabs.add_child(keep_tab.panel)
+	_action_box.add_child(tabs)
+
+	var all_tabs := [trade_tab, sell_tab, keep_tab]
+	var select_tab := func(selected: Dictionary):
+		for t in all_tabs:
+			t.style.border_color = _theme.color_placed if t == selected else _theme.color_label.darkened(0.4)
+	trade_tab.header.pressed.connect(select_tab.bind(trade_tab))
+	sell_tab.header.pressed.connect(select_tab.bind(sell_tab))
+	keep_tab.header.pressed.connect(select_tab.bind(keep_tab))
+	select_tab.call(keep_tab)   # nothing chosen yet -> the whole holding is kept
+
 	var update_keep := func(_v = 0):
 		var k := held - int(sell.value) - int(trade.value)
-		keep.text = "Keep: %d   (sells @ %s%d = %s%d)" % [maxi(k, 0), _theme.currency_symbol, price, _theme.currency_symbol, int(sell.value) * price]
+		keep_lbl.text = "%d" % maxi(k, 0)
 	sell.value_changed.connect(update_keep)
 	trade.value_changed.connect(update_keep)
 	update_keep.call()
@@ -1307,6 +1349,53 @@ func _build_dispose_actions() -> void:
 	confirm.text = "Confirm"
 	confirm.pressed.connect(func(): _on_dispose_confirm(defunct, player, int(sell.value), int(trade.value)))
 	_action_box.add_child(confirm)
+
+## One Trade/Sell/Keep "tab" for _build_dispose_actions(): a bordered panel
+## with a clickable header (purely a focus-highlight toggle — see the call
+## site's comment) plus either a SpinBox (Trade/Sell) or a read-only value
+## Label (Keep, which is just the auto-computed remainder, never a direct
+## input). Returns the pieces the caller needs to wire up: the panel itself,
+## the header button (to connect the highlight toggle), and the underlying
+## StyleBoxFlat (to actually change the highlight color).
+func _build_dispose_tab(title: String, spinbox: SpinBox, caption: String, value_lbl: Label = null) -> Dictionary:
+	var panel := PanelContainer.new()
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = _theme.color_empty.darkened(0.2)
+	sb.border_color = _theme.color_label.darkened(0.4)
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(6)
+	sb.set_content_margin_all(8)
+	panel.add_theme_stylebox_override("panel", sb)
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	var v := VBoxContainer.new()
+	v.alignment = BoxContainer.ALIGNMENT_CENTER
+	v.add_theme_constant_override("separation", 4)
+	panel.add_child(v)
+
+	var header := Button.new()
+	header.text = title
+	header.flat = true
+	header.add_theme_font_size_override("font_size", 14)
+	header.add_theme_color_override("font_color", _theme.color_label)
+	v.add_child(header)
+
+	if spinbox:
+		v.add_child(spinbox)
+	elif value_lbl:
+		value_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		v.add_child(value_lbl)
+
+	if not caption.is_empty():
+		var cap := Label.new()
+		cap.text = caption
+		cap.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		cap.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		cap.add_theme_font_size_override("font_size", 10)
+		cap.add_theme_color_override("font_color", _theme.color_lone_tile)
+		v.add_child(cap)
+
+	return {"panel": panel, "header": header, "style": sb}
 
 func _build_buy_actions() -> void:
 	var active := state.available_active_chains()
