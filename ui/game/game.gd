@@ -33,7 +33,7 @@ const THEME_DISPLAY_NAMES := {
 	"default": "Classic",
 	"fantasy": "Fantasy",
 }
-var _theme_key := "fantasy"
+var _theme_key := "default"
 var _theme_toggle_btn: Button
 
 # UI nodes built in _build_layout().
@@ -92,6 +92,7 @@ var _my_player_name := ""
 
 func _ready() -> void:
 	_theme = load(THEME_PATHS[_theme_key])
+	_sync_music_for_theme()
 	_build_layout()
 	if NetConfig.has_pending:
 		_my_player_name = NetConfig.player_name
@@ -438,7 +439,18 @@ func _on_theme_toggle_pressed() -> void:
 		return
 	_theme_key = "default" if _theme_key == "fantasy" else "fantasy"
 	_theme = load(THEME_PATHS[_theme_key])
+	_sync_music_for_theme()
 	call_deferred("_rebuild_themed_ui")
+
+## The Closing Bell only fits the default theme's tone -- silence it in
+## Fantasy mode and resume it on switching back. Called both on first
+## _ready() (in case the scene starts in default theme) and from the
+## toggle handler above.
+func _sync_music_for_theme() -> void:
+	if _theme_key == "fantasy":
+		SfxManager.stop_music()
+	else:
+		SfxManager.play_music()
 
 func _rebuild_themed_ui() -> void:
 	_build_layout()
@@ -645,6 +657,7 @@ func _apply_event_ui(event: Dictionary) -> void:
 			_msg(_starting_draw_summary())
 			_refresh_all()
 		Event.TILE_PLACED:
+			SfxManager.play_tile()
 			if p.kind == Kind.ISOLATED:
 				_msg("Placed %s." % AcqEnums.tile_label(p.coord.x, p.coord.y))
 			else:
@@ -664,6 +677,7 @@ func _apply_event_ui(event: Dictionary) -> void:
 			_merge_mode = "tie" if _merge_candidates.size() > 1 else ""
 			_refresh_all()
 		Event.MERGER_STARTED:
+			SfxManager.play_merger()
 			_merge_survivor = p.survivor
 			_disposal_queue = p.disposal_queue.duplicate(true)
 			_merge_mode = "dispose"
@@ -925,6 +939,7 @@ func _refresh_rack() -> void:
 				var redraw := Button.new()
 				redraw.text = "Redraw"
 				redraw.add_theme_font_size_override("font_size", 11)
+				redraw.pressed.connect(SfxManager.play_button)
 				redraw.pressed.connect(_redraw_tile.bind(tile))
 				col.add_child(redraw)
 			_rack_box.add_child(col)
@@ -1357,11 +1372,15 @@ func _build_dispose_actions() -> void:
 		keep_lbl.text = "%d" % maxi(k, 0)
 	sell.value_changed.connect(update_keep)
 	trade.value_changed.connect(update_keep)
+	sell.value_changed.connect(func(_v): SfxManager.play_stepper())
+	trade.value_changed.connect(func(_v): SfxManager.play_stepper())
 	update_keep.call()
 
 	var confirm := Button.new()
 	confirm.text = "Confirm"
-	confirm.pressed.connect(func(): _on_dispose_confirm(defunct, player, int(sell.value), int(trade.value)))
+	confirm.pressed.connect(func():
+		SfxManager.play_button()
+		_on_dispose_confirm(defunct, player, int(sell.value), int(trade.value)))
 	_action_box.add_child(confirm)
 
 ## One Trade/Sell/Keep "tab" for _build_dispose_actions(): a bordered panel
@@ -1390,6 +1409,7 @@ func _build_dispose_tab(title: String, spinbox: SpinBox, caption: String, value_
 	var header := Button.new()
 	header.text = title
 	header.flat = true
+	header.pressed.connect(SfxManager.play_button)
 	header.add_theme_font_size_override("font_size", 14)
 	header.add_theme_color_override("font_color", _theme.color_label)
 	v.add_child(header)
@@ -1487,6 +1507,7 @@ func _build_buy_card(chain: int, total: int) -> PanelContainer:
 	minus.text = "−"
 	minus.disabled = not can_dec
 	minus.custom_minimum_size = Vector2(30, 28)
+	minus.pressed.connect(SfxManager.play_stepper)
 	minus.pressed.connect(_set_buy.bind(chain, count - 1))
 	stepper.add_child(minus)
 	var count_lbl := Label.new()
@@ -1498,6 +1519,7 @@ func _build_buy_card(chain: int, total: int) -> PanelContainer:
 	plus.text = "+"
 	plus.disabled = not can_inc
 	plus.custom_minimum_size = Vector2(30, 28)
+	plus.pressed.connect(SfxManager.play_stepper)
 	plus.pressed.connect(_set_buy.bind(chain, count + 1))
 	stepper.add_child(plus)
 	v.add_child(stepper)
@@ -1701,6 +1723,7 @@ func _chain_button(chain: int, callback: Callable, suffix := "") -> Button:
 	sb_hover.bg_color = col.darkened(0.2)
 	b.add_theme_stylebox_override("hover", sb_hover)
 	b.add_theme_color_override("font_color", _theme.color_label)
+	b.pressed.connect(SfxManager.play_button)
 	b.pressed.connect(callback.bind(chain))
 	return b
 
@@ -1722,6 +1745,7 @@ func _bordered_button(text: String) -> Button:
 	sb_hover.bg_color = _theme.color_hover
 	b.add_theme_stylebox_override("hover", sb_hover)
 	b.add_theme_color_override("font_color", _theme.color_label)
+	b.pressed.connect(SfxManager.play_button)
 	return b
 
 func _clear(container: Node) -> void:
