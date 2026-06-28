@@ -16,7 +16,7 @@ extends Node
 ## Default address of the deployed relay-server/ instance (see that
 ## directory's README for deployment). Override at runtime if you're running
 ## your own relay elsewhere.
-const DEFAULT_RELAY_URL := "ws://127.0.0.1:8080"
+const DEFAULT_RELAY_URL := "wss://bcquire.onrender.com"
 
 var has_pending := false
 var mode := "hotseat"   # "hotseat" | "host" | "join" | "host_relay" | "join_relay"
