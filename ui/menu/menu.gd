@@ -9,6 +9,7 @@ var _name_edit: LineEdit
 var _host_port_edit: LineEdit
 var _join_addr_edit: LineEdit
 var _join_port_edit: LineEdit
+var _join_code_edit: LineEdit
 var _status_lbl: Label
 
 func _ready() -> void:
@@ -82,6 +83,29 @@ func _build_layout() -> void:
 	join_row.add_child(join_btn)
 	root.add_child(join_row)
 
+	root.add_child(HSeparator.new())
+
+	var online_lbl := Label.new()
+	online_lbl.text = "Play online (different networks)"
+	root.add_child(online_lbl)
+
+	var host_online_btn := Button.new()
+	host_online_btn.text = "Host Online Game"
+	host_online_btn.pressed.connect(_on_host_online_pressed)
+	root.add_child(host_online_btn)
+
+	var join_online_row := HBoxContainer.new()
+	join_online_row.add_theme_constant_override("separation", 8)
+	_join_code_edit = LineEdit.new()
+	_join_code_edit.placeholder_text = "Join code"
+	_join_code_edit.custom_minimum_size = Vector2(100, 0)
+	join_online_row.add_child(_join_code_edit)
+	var join_online_btn := Button.new()
+	join_online_btn.text = "Join Online Game"
+	join_online_btn.pressed.connect(_on_join_online_pressed)
+	join_online_row.add_child(join_online_btn)
+	root.add_child(join_online_row)
+
 	_status_lbl = Label.new()
 	_status_lbl.text = ""
 	root.add_child(_status_lbl)
@@ -102,4 +126,13 @@ func _on_join_pressed() -> void:
 	var addr := _join_addr_edit.text if not _join_addr_edit.text.is_empty() else "127.0.0.1"
 	var port := int(_join_port_edit.text) if _join_port_edit.text.is_valid_int() else 8910
 	NetConfig.set_join(_player_name(), addr, port)
+	get_tree().change_scene_to_file("res://ui/game/Game.tscn")
+
+func _on_host_online_pressed() -> void:
+	NetConfig.set_host_relay(_player_name())
+	get_tree().change_scene_to_file("res://ui/game/Game.tscn")
+
+func _on_join_online_pressed() -> void:
+	var code := _join_code_edit.text.strip_edges().to_upper()
+	NetConfig.set_join_relay(_player_name(), NetConfig.DEFAULT_RELAY_URL, code)
 	get_tree().change_scene_to_file("res://ui/game/Game.tscn")

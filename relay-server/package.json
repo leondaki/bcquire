@@ -1,0 +1,15 @@
+{
+  "name": "acquire-relay-server",
+  "version": "1.0.0",
+  "description": "Game-agnostic WebSocket relay for Acquire online play: rooms/join-codes + packet forwarding.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

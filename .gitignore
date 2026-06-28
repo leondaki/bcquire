@@ -9,3 +9,6 @@ export_presets.cfg
 # OS cruft
 .DS_Store
 Thumbs.db
+
+# relay-server (Node.js) dependencies — reinstalled via `npm install`
+relay-server/node_modules/

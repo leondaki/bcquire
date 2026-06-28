@@ -101,7 +101,8 @@ const MIN_NETWORK_PLAYERS := 2
 const MAX_NETWORK_PLAYERS := 6
 var _peer_to_seat: Dictionary = {}        # host-side: peer id -> seat index, set once the game starts
 var _disconnected_seats: Dictionary = {}  # host-side: seat index -> true while that seat's peer is gone
-var _net_transport: EnetTransport         # set by _host_networked_game/_join_networked_game
+var _net_transport         # EnetTransport or RelayTransport — duck-typed, see net/network_transport.gd
+var _relay_code_lbl: Label  # host-only: persistent display of the relay join code
 
 # Carried from ui/menu/menu.gd via the NetConfig autoload (see _ready()).
 # Used as this seat's display name instead of the "Player N" default.
@@ -118,12 +119,18 @@ func _ready() -> void:
 		var host_port: int = NetConfig.host_port
 		var join_addr: String = NetConfig.join_address
 		var join_port: int = NetConfig.join_port
+		var relay_url: String = NetConfig.relay_url
+		var join_code: String = NetConfig.join_code
 		NetConfig.clear()
 		match mode:
 			"host":
 				_host_networked_game(host_port)
 			"join":
 				_join_networked_game(join_addr, join_port)
+			"host_relay":
+				_host_relay_game(relay_url)
+			"join_relay":
+				_join_relay_game(relay_url, join_code)
 			_:
 				_init_default_session()
 				_start_new_game()
@@ -494,6 +501,14 @@ func _build_network_status_row() -> HBoxContainer:
 	_net_status_lbl.text = "Not networked — playing solo/hotseat."
 	_net_status_lbl.add_theme_color_override("font_color", _theme.color_lone_tile)
 	row.add_child(_net_status_lbl)
+
+	# Stays visible for the whole lobby (unlike _net_status_lbl, which
+	# _on_lobby_peer_joined/_left overwrite with a player count) so the host
+	# can always glance back at the code to re-share it.
+	_relay_code_lbl = Label.new()
+	_relay_code_lbl.visible = false
+	_relay_code_lbl.add_theme_font_size_override("font_size", 16)
+	row.add_child(_relay_code_lbl)
 	return row
 
 ## Host an ENet server on `port` and wait in the lobby for joiners; the host
@@ -556,6 +571,67 @@ func _join_networked_game(addr: String, port: int) -> void:
 	transport.peer_left.connect(func(_id): _msg("Disconnected from host."))
 	state = null   # frozen board until the host's GAME_STARTED deals a real GameState
 	_net_status_lbl.text = "Connecting to %s:%d..." % [addr, port]
+	_refresh_all()
+
+## Host a relay-server room for internet play (players on different
+## networks) and wait in the lobby for joiners. Same lobby flow as
+## _host_networked_game() above — only the transport and the "share this
+## code" feedback differ. See net/relay_transport.gd.
+func _host_relay_game(relay_url: String) -> void:
+	var transport := RelayTransport.new()
+	add_child(transport)
+	var err := transport.host_relay(relay_url)
+	if err != OK:
+		_net_status_lbl.text = "Failed to connect to relay (error %d)." % err
+		transport.queue_free()
+		return
+
+	_is_networked = true
+	_lobby_peers = []
+	_lobby_peer_names = {}
+	_peer_to_seat = {}
+	_disconnected_seats = {}
+	_net_transport = transport
+	session = GameSession.new(transport, true, 0)
+	session.hotseat_mode = false
+	session.event_applied.connect(_on_event_applied)
+	transport.peer_joined.connect(_on_lobby_peer_joined)
+	transport.peer_left.connect(_on_lobby_peer_left)
+	transport.peer_hello.connect(_on_peer_hello)
+	transport.room_code_ready.connect(func(code: String):
+		_relay_code_lbl.text = "Join code: %s" % code
+		_relay_code_lbl.visible = true
+		_net_status_lbl.text = "Hosting online — 0 player(s) joined.")
+	state = null   # frozen board until "Start Networked Game" deals a real GameState
+	_start_net_btn.disabled = true   # re-enabled once MIN_NETWORK_PLAYERS have joined
+	_start_net_btn.visible = true
+	_net_status_lbl.text = "Connecting to relay..."
+	_refresh_all()
+
+## Join a relay-server room by its short code (internet play) and wait for
+## the host's GAME_STARTED broadcast. Same lobby flow as
+## _join_networked_game() above — only the transport differs.
+func _join_relay_game(relay_url: String, code: String) -> void:
+	var transport := RelayTransport.new()
+	add_child(transport)
+	var err := transport.join_relay(relay_url, code)
+	if err != OK:
+		_net_status_lbl.text = "Failed to connect to relay (error %d)." % err
+		transport.queue_free()
+		return
+
+	_is_networked = true
+	_net_transport = transport
+	session = GameSession.new(transport, false, -1)   # seat unknown until GAME_STARTED arrives
+	session.hotseat_mode = false
+	session.event_applied.connect(_on_event_applied)
+	transport.join_succeeded.connect(func():
+		_net_status_lbl.text = "Connected — waiting for host to start."
+		transport.send_hello(_my_player_name if not _my_player_name.is_empty() else "Player"))
+	transport.join_failed.connect(func(reason): _net_status_lbl.text = "Join failed: %s" % reason)
+	transport.peer_left.connect(func(_id): _msg("Disconnected from host."))
+	state = null   # frozen board until the host's GAME_STARTED deals a real GameState
+	_net_status_lbl.text = "Connecting to relay with code %s..." % code
 	_refresh_all()
 
 func _on_lobby_peer_joined(peer_id: int) -> void:
